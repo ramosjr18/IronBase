@@ -6,25 +6,48 @@
 module_meta() {
     echo "Name: Firewall Hardening"
     echo "Description: Ensures UFW is enabled and basic policies are set."
-    echo "Version: 1.0.0"
+    echo "Version: 1.1.0"
 }
 
 module_scan() {
-    # Check if UFW is installed
+    # 1. Check Install
     if ! command_exists ufw; then
-        echo "FAIL: UFW not installed"
+        add_finding "FW-001" "$SEV_HIGH" "$STATUS_FAIL" "UFW Installed" \
+            "UFW is not installed." \
+            "" \
+            "Install 'ufw' package."
         return 1
     fi
 
-    # Check status
-    local status
-    status=$(sudo ufw status | grep "Status: active")
-    if [[ -z "$status" ]]; then
-        echo "FAIL: UFW is not active"
+    # 2. Check Status
+    local status_out
+    status_out=$(sudo ufw status verbose 2>/dev/null)
+    if echo "$status_out" | grep -q "Status: active"; then
+        add_finding "FW-002" "$SEV_HIGH" "$STATUS_PASS" "UFW Status" \
+            "UFW is active." \
+            "" \
+            ""
+            
+        # 3. Check Policies (Default Deny Incoming)
+        if echo "$status_out" | grep -q "Default: deny (incoming)"; then
+            add_finding "FW-003" "$SEV_MEDIUM" "$STATUS_PASS" "Default Incoming Policy" \
+                "Default incoming policy is DENY." \
+                "" \
+                ""
+        else
+            add_finding "FW-003" "$SEV_HIGH" "$STATUS_FAIL" "Default Incoming Policy" \
+                "Default incoming policy is NOT deny." \
+                "Current: $(echo "$status_out" | grep "Default:")" \
+                "Run 'ufw default deny incoming'"
+        fi
+    else
+        add_finding "FW-002" "$SEV_HIGH" "$STATUS_FAIL" "UFW Status" \
+            "UFW is inactive." \
+            "" \
+            "Run 'ufw enable'"
         return 1
     fi
 
-    echo "PASS: UFW is active"
     return 0
 }
 

@@ -5,6 +5,7 @@
 
 # Load utilities
 source "$(dirname "$0")/../core/utils.sh"
+source "$(dirname "$0")/../core/findings.sh"
 
 IRONBASE_ROOT="$(dirname "$0")/.."
 MODULES_DIR="$IRONBASE_ROOT/modules"
