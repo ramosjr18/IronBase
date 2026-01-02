@@ -1,0 +1,13 @@
+# profiles/ubuntu-baseline.yaml
+# Minimal v0 profile
+
+modules:
+  firewall:
+    enabled: true
+    description: "Ensure UFW is active"
+  ssh:
+    enabled: true
+    description: "Lock down SSH"
+  system:
+    enabled: true
+    description: "Keep system updated"
