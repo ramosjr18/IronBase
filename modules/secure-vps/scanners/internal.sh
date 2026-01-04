@@ -169,12 +169,15 @@ scan_internal() {
     fi
 
     # --- 4. System Anomalies ---
-    # World Writable Dirs in PATH (Generic check)
-    if echo $PATH | tr ':' '\n' | xargs -I {} find {} -maxdepth 0 -perm -002 2>/dev/null; then
+    # World Writable Dirs in PATH
+    # Capture output to avoid noise appropriately and check content instead of exit code
+    local writable_dirs=$(echo $PATH | tr ':' '\n' | xargs -I {} find {} -maxdepth 0 -perm -002 2>/dev/null)
+    
+    if [[ -n "$writable_dirs" ]]; then
          add_vps_finding "INT-SYS-003" "$SEV_HIGH" "$TYPE_VULN" "$ORIGIN_INTERNAL" "System" \
             "World Writable Directory in PATH" \
             "Directories in PATH are writable by others." \
-            "" \
-            "Fix permissions on system directories."
+            "$writable_dirs" \
+            "Fix permissions on system directories (chmod o-w)."
     fi
 }
