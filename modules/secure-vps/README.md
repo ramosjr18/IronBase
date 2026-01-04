@@ -25,7 +25,19 @@ Este módulo implementa una evaluación de seguridad integral diseñada específ
 ## Uso
 
 ### Modo Standalone
-Si has clonado este repo o solo este módulo:
+
+Para **clonar y usar solo este módulo** (sin descargar todo IronBase):
+
+```bash
+git clone --no-checkout https://github.com/ramosjr18/IronBase.git
+cd IronBase
+git sparse-checkout init --cone
+git sparse-checkout set modules/secure-vps
+git checkout
+cd modules/secure-vps
+```
+
+Una vez en el directorio:
 
 ```bash
 chmod +x modules/secure-vps/standalone.sh

@@ -10,11 +10,47 @@ scan_internal() {
     
     # Kernel Version
     local kernel_version=$(uname -r)
-    add_vps_finding "INT-SYS-001" "$SEV_INFO" "$TYPE_MISCONFIG" "$ORIGIN_INTERNAL" "System" \
-        "Kernel Version" \
-        "Running Kernel: $kernel_version" \
-        "uname -r" \
-        "Ensure kernel is up to date."
+    # Parse Major and Minor version
+    local k_major=""
+    local k_minor=""
+    if [[ "$kernel_version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+        k_major="${BASH_REMATCH[1]}"
+        k_minor="${BASH_REMATCH[2]}"
+    fi
+
+    # Logic:
+    # < 4.19 : FAIL (EOL)
+    # 4.19 - 5.15 : WARN (Old/LTS)
+    # >= 5.15 : PASS
+    
+    if [[ -n "$k_major" ]]; then
+        if (( k_major < 4 )) || { (( k_major == 4 )) && (( k_minor < 19 )); }; then
+            add_vps_finding "INT-SYS-001" "$SEV_HIGH" "$TYPE_VULN" "$ORIGIN_INTERNAL" "System" \
+                "Kernel EOL Detected" \
+                "Running Kernel: $kernel_version (Older than 4.19)" \
+                "uname -r" \
+                "Upgrade to a supported LTS kernel immediately (5.15+ recommended)."
+        elif (( k_major == 4 )) || { (( k_major == 5 )) && (( k_minor < 15 )); }; then
+             add_vps_finding "INT-SYS-001" "$SEV_LOW" "$TYPE_RISK" "$ORIGIN_INTERNAL" "System" \
+                "Legacy Kernel Detected" \
+                "Running Kernel: $kernel_version (Supported but older generation)" \
+                "uname -r" \
+                "Plan upgrade to modern LTS kernel (5.15+)."
+        else
+             add_vps_finding "INT-SYS-001" "$SEV_INFO" "$TYPE_MISCONFIG" "$ORIGIN_INTERNAL" "System" \
+                "Kernel Version OK" \
+                "Running Kernel: $kernel_version (Modern)" \
+                "uname -r" \
+                "Keep kernel updated."
+        fi
+    else
+        # Fallback if parsing fails
+        add_vps_finding "INT-SYS-001" "$SEV_INFO" "$TYPE_MISCONFIG" "$ORIGIN_INTERNAL" "System" \
+            "Kernel Version (Unparsed)" \
+            "Running Kernel: $kernel_version" \
+            "uname -r" \
+            "Ensure kernel is up to date."
+    fi
 
     # ASLR Check
     if command -v sysctl &> /dev/null; then
