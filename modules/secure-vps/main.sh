@@ -22,6 +22,12 @@ module_meta() {
     echo "Version: 1.0.0"
 }
 
+# Globals to track severity counts
+VPS_COUNT_CRITICAL=0
+VPS_COUNT_HIGH=0
+VPS_COUNT_MEDIUM=0
+VPS_COUNT_LOW=0
+
 # Override add_vps_finding to bridge to IronBase's add_finding
 add_vps_finding() {
     local id="$1"
@@ -34,13 +40,19 @@ add_vps_finding() {
     local evidence="$8"
     local remediation="$9"
 
+    # Increment counters
+    case "$severity" in
+        "$SEV_CRITICAL") ((VPS_COUNT_CRITICAL++)) ;;
+        "$SEV_HIGH") ((VPS_COUNT_HIGH++)) ;;
+        "$SEV_MEDIUM") ((VPS_COUNT_MEDIUM++)) ;;
+        "$SEV_LOW") ((VPS_COUNT_LOW++)) ;;
+    esac
+
     # Map to IronBase `add_finding` signature:
     # add_finding "ID" "SEVERITY" "STATUS" "TITLE" "DESCRIPTION" "EVIDENCE" "REMEDIATION"
     
     # We map "severity" directly.
     # We map "status" based on severity (CRITICAL/HIGH/MED -> FAIL, LOW/INFO -> WARN/INFO).
-    # But wait, IronBase `add_finding` expects explicit STATUS.
-    # Let's derive a status.
     
     local status="$STATUS_FAIL"
     if [[ "$severity" == "$SEV_INFO" ]]; then
@@ -57,9 +69,21 @@ add_vps_finding() {
 
 module_scan() {
     # Run the scans
-    # The override above will catch the findings and send them to the core engine
     scan_internal
     scan_external
+    
+    # Determine exit code based on severity
+    if (( VPS_COUNT_CRITICAL > 0 )) || (( VPS_COUNT_HIGH > 0 )); then
+        return 1 # Fail the module
+    elif (( VPS_COUNT_MEDIUM > 0 )); then
+        # Optional: Decide if Medium should fail. Usually Medium implies risk but maybe passing with warnings?
+        # User requested: "PASSED WITH FINDINGS" or "FAILED".
+        # Core only supports 0 (PASSED) or !0 (FAILED).
+        # Let's fail on High/Critical.
+        return 0
+    fi
+    
+    return 0
 }
 
 module_apply() {
