@@ -86,17 +86,63 @@ scan_internal() {
     # --- 2. Services & Daemons ---
     # Check for active services listening on non-localhost
     
-    # Helper to find potentially dangerous services on public interfaces
-    # Simplification: we use ss to find listening ports not on 127.0.0.1
     if command -v ss &> /dev/null; then
-        local exposed_Listeners=$(ss -lntu | awk '$4 !~ /^127\.0\.0\.1/ && $4 !~ /^\[::1\]/ && NR>1 {print $0}')
+        # Capture raw lines of exposed services (excluding 127.0.0.1 and ::1)
+        # Note: Local Address:Port is usually column 5 in 'ss -lntu'
+        local raw_exposed=$(ss -lntu | awk '$5 !~ /^127\.0\.0\.1/ && $5 !~ /^\[::1\]/ && NR>1 {print $0}')
         
-        if [[ -n "$exposed_Listeners" ]]; then
-             add_vps_finding "INT-NET-001" "$SEV_MEDIUM" "$TYPE_RISK" "$ORIGIN_INTERNAL" "Network" \
-                "Services listening on non-loopback interfaces" \
-                "Potentially exposed services found." \
-                "$exposed_Listeners" \
-                "Review if these services need to be exposed to 0.0.0.0 or public IP."
+        if [[ -n "$raw_exposed" ]]; then
+            local list_critical=""
+            local list_expected=""
+            local list_unknown=""
+            
+            # Classification Lists
+            # Internal/Critical: DBs, Docker, Mgmt
+            local ports_critical="^(6379|543[0-9]|3306|27017|9200|237[0-9])$" 
+            # Expected Public: Web (80, 443), VoIP/RTC (3478, 7880, 7881)
+            local ports_expected="^(80|443|3478|7880|7881)$"
+
+            while read -r line; do
+                # Extract port. Format is usually "IP:PORT" or "*:PORT"
+                # $5 in ss output is Local_Address:Port. 
+                # awk logic to split by last colon
+                local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
+                
+                if [[ "$port" =~ $ports_critical ]]; then
+                    list_critical+="${line}\n"
+                elif [[ "$port" =~ $ports_expected ]]; then
+                    list_expected+="${line}\n"
+                else
+                    list_unknown+="${line}\n"
+                fi
+            done <<< "$raw_exposed"
+
+            # 2a. Critical/Internal Services Exposed
+            if [[ -n "$list_critical" ]]; then
+                 add_vps_finding "INT-NET-002" "$SEV_CRITICAL" "$TYPE_RISK" "$ORIGIN_INTERNAL" "Network" \
+                    "Critical Internal Services Exposed" \
+                    "Services usually meant for internal use (DB, Docker) are listening externally." \
+                    "$(echo -e $list_critical)" \
+                    "IMMEDIATE ACTION: Bind these services to 127.0.0.1 or use a Firewall/VPN."
+            fi
+
+            # 2b. Expected/Public Services
+            if [[ -n "$list_expected" ]]; then
+                 add_vps_finding "INT-NET-003" "$SEV_INFO" "$TYPE_RISK" "$ORIGIN_INTERNAL" "Network" \
+                    "Known Public Services Detected" \
+                    "Standard public services (Web, VoIP) are active." \
+                    "$(echo -e $list_expected)" \
+                    "Verify versions and configuration (WAF/Cloudflare etc)."
+            fi
+
+            # 2c. Unknown/Other Services
+            if [[ -n "$list_unknown" ]]; then
+                 add_vps_finding "INT-NET-001" "$SEV_MEDIUM" "$TYPE_RISK" "$ORIGIN_INTERNAL" "Network" \
+                    "Unclassified Services Exposed" \
+                    "Services listening on public interfaces not in allow-list." \
+                    "$(echo -e $list_unknown)" \
+                    "Review each service. If internal only, bind to localhost."
+            fi
         fi
     fi
 
