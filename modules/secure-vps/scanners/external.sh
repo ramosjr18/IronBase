@@ -51,8 +51,8 @@ scan_external() {
     if is_port_listening_globally "22" "tcp"; then
          add_vps_finding "EXT-SSH-001" "$SEV_MEDIUM" "$TYPE_RISK" "$ORIGIN_EXTERNAL" "Auth" \
             "SSH on Default Port 22" \
-            "SSH service detected on standard port 22 exposed globally." \
+            "SSH service detected on standard port 22 exposed globally. Note: Changing port is not a security control by itself, but reduces automated scanning noise." \
             "ss -lnt | grep :22" \
-            "Consider changing SSH port or restricting access via Firewall/VPN."
+            "Consider changing SSH port (noise reduction) or strictly limiting access via Firewall/VPN (security control)."
     fi
 }
