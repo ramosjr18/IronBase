@@ -10,7 +10,6 @@ scan_internal() {
     
     # Kernel Version
     local kernel_version=$(uname -r)
-    # Parse Major and Minor version
     local k_major=""
     local k_minor=""
     if [[ "$kernel_version" =~ ^([0-9]+)\.([0-9]+) ]]; then
@@ -18,11 +17,6 @@ scan_internal() {
         k_minor="${BASH_REMATCH[2]}"
     fi
 
-    # Logic:
-    # < 4.19 : FAIL (EOL)
-    # 4.19 - 5.15 : WARN (Old/LTS)
-    # >= 5.15 : PASS
-    
     if [[ -n "$k_major" ]]; then
         if (( k_major < 4 )) || { (( k_major == 4 )) && (( k_minor < 19 )); }; then
             add_vps_finding "INT-SYS-001" "$SEV_HIGH" "$TYPE_VULN" "$ORIGIN_INTERNAL" "System" \
@@ -44,7 +38,6 @@ scan_internal() {
                 "Keep kernel updated."
         fi
     else
-        # Fallback if parsing fails
         add_vps_finding "INT-SYS-001" "$SEV_INFO" "$TYPE_MISCONFIG" "$ORIGIN_INTERNAL" "System" \
             "Kernel Version (Unparsed)" \
             "Running Kernel: $kernel_version" \
@@ -84,8 +77,6 @@ scan_internal() {
     fi
 
     # --- 2. Services & Daemons ---
-    # Check for active services listening on non-localhost
-    
     if command -v ss &> /dev/null; then
         # Capture raw lines of exposed services (excluding 127.0.0.1 and ::1)
         # Note: Local Address:Port is usually column 5 in 'ss -lntu'
@@ -96,16 +87,12 @@ scan_internal() {
             local list_expected=""
             local list_unknown=""
             
-            # Classification Lists
-            # Internal/Critical: DBs, Docker, Mgmt
-            local ports_critical="^(6379|543[0-9]|3306|27017|9200|237[0-9])$" 
-            # Expected Public: Web (80, 443), VoIP/RTC (3478, 7880, 7881)
-            local ports_expected="^(80|443|3478|7880|7881)$"
+            # Classification Regexs came from lib/baseline.sh
+            # Use defaults if not sourced
+            local ports_critical="${BASELINE_PORTS_CRITICAL:-^(6379|543[0-9]|3306|27017|9200|237[0-9])$}"
+            local ports_expected="${BASELINE_PORTS_EXPECTED:-^(80|443|3478|7880|7881)$}"
 
             while read -r line; do
-                # Extract port. Format is usually "IP:PORT" or "*:PORT"
-                # $5 in ss output is Local_Address:Port. 
-                # awk logic to split by last colon
                 local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
                 
                 if [[ "$port" =~ $ports_critical ]]; then
@@ -170,9 +157,7 @@ scan_internal() {
 
     # --- 4. System Anomalies ---
     # World Writable Dirs in PATH
-    # Capture output to avoid noise appropriately and check content instead of exit code
     local writable_dirs=$(echo $PATH | tr ':' '\n' | xargs -I {} find {} -maxdepth 0 -perm -002 2>/dev/null)
-    
     if [[ -n "$writable_dirs" ]]; then
          add_vps_finding "INT-SYS-003" "$SEV_HIGH" "$TYPE_VULN" "$ORIGIN_INTERNAL" "System" \
             "World Writable Directory in PATH" \

@@ -1,63 +1,58 @@
-# Secure VPS Assessment Module
+# Secure VPS Module (secure-vps)
 
-Este módulo implementa una evaluación de seguridad integral diseñada específicamente para servidores VPS expuestos a internet. A diferencia de un escáner genérico, analiza la postura de seguridad desde dentro (host-based) y simula una visión externa (network-based) para detectar exposiciones riesgosas, configuraciones por defecto peligrosas y vulnerabilidades comunes en despliegues cloud.
+A self-contained security assessment module for public Linux VPS environments. This module evaluates the security posture from both an **Internal** (Host-based) and **External** (Network-based simulation) perspective.
 
-## Características
+## Features
 
--   **Dual Perspective**: Combina auditoría interna (permisos, kernel, usuarios) con simulación externa (puertos expuestos, IP pública).
--   **No-Ops**: Por defecto es read-only. No modifica el sistema.
--   **Zero Dependency Standalone**: Puede ejecutarse sin instalar todo IronBase, clonando solo este módulo.
--   **Actionable Findings**: Reportes detallados con evidencia, remediación y clasificación por tipo (Misconfiguration, Risk, Vulnerability).
+*   **Dual-Perspective Scanning**:
+    *   **Internal**: Checks kernel version, OS hardening, exposed internal services, SSH configuration, and system anomalies.
+    *   **External**: Simulates network exposure checks (Open ports, Public IP, SSH default port).
+*   **Structured Findings**: Categorizes findings by Severity (Critical to Info), Type (Vuln, Risk, Misconfig), and Origin.
+*   **Actionable Reporting**: Provides clear **Recommendations** and **Evidence** for every finding.
+*   **Auto-generated Report**: Saves a full detail report to `secure-vps-scan.txt` after every run.
 
-## Cobertura
+## Usage
 
-### Internal Scan (Host-Based)
--   **System**: Versión de Kernel, chequeo de ASLR, directorios con permisos débiles.
--   **Auth**: Usuarios root extra, cuentas sin password, configuración robusta de SSH (Root Login, Password Auth).
--   **Network**: Servicios escuchando en interfaces no-locales (0.0.0.0).
-
-### External Scan (Simulated)
--   **Exposure**: Detección de IP Pública real.
--   **Ports**: Simulación de puertos accesibles desde internet (cruzando data de sockets con IP pública).
--   **Fingerprinting**: Respuesta a ICMP Ping.
--   **Services**: Exposición de SSH en puerto 22 default.
-
-## Uso
-
-### Modo Standalone
-
-Para **clonar y usar solo este módulo** (sin descargar todo IronBase):
+### Integrated Mode (IronBase)
+Run as part of the IronBase suite:
 
 ```bash
-git clone --no-checkout https://github.com/ramosjr18/IronBase.git
-cd IronBase
-git sparse-checkout init --cone
-git sparse-checkout set modules/secure-vps
-git checkout
-cd modules/secure-vps
+# Scan
+./cmd/ironbase scan --module secure-vps
+
+# Apply Fixes (Manual Review Recommended first)
+./cmd/ironbase apply --module secure-vps
 ```
 
-Una vez en el directorio:
+### Standalone Mode
+Run independently without the full IronBase engine:
 
 ```bash
-chmod +x modules/secure-vps/standalone.sh
+git sparse-checkout set modules/secure-vps
 ./modules/secure-vps/standalone.sh
 ```
 
-### Modo Integrado (IronBase)
-Ejecutar a través del engine principal:
+## Report Output
 
-```bash
-./cmd/ironbase scan --module secure-vps
-```
+Every execution generates a report file: `secure-vps-scan.txt` in the current working directory.
+This file contains:
+- Executive Summary
+- Full Findings Details (including non-truncated evidence)
+- Next Steps
 
-## Interpretación de Resultados
+## Severity & Classification
 
-Los hallazgos se clasifican en:
--   **Misconfiguration**: Configuración que se desvía de las mejores prácticas (ej. SSH Root Login enabled).
--   **Vulnerability**: Fallo de seguridad explotable directo (ej. usuario sin password).
--   **Risk Exposure**: Condición que aumenta la superficie de ataque (ej. servicio de base de datos escuchando en 0.0.0.0).
+| Severity | Description |
+| :--- | :--- |
+| **CRITICAL** | Immediate threat to system compromise (e.g. Empty Passwords, Root exposed services). |
+| **HIGH** | Significant risk (e.g. EOL Kernel, World Writable PATH). |
+| **MEDIUM** | Moderate risk or standard hardening gap (e.g. Unknown ports listening). |
+| **LOW** | Best practice deviation (e.g. Legacy but supported kernel). |
+| **INFO** | informational finding (e.g. Public IP detection). |
 
-## Limitaciones
--   El escaneo externo es una *simulación* desde el host. No sustituye un escaneo real con Nmap desde una IP externa.
--   La detección de IP pública depende de servicios externos (ifconfig.me / ipify).
+## Internal Service Classification
+
+The module automatically classifies listening ports:
+*   **Critical**: Databases and Management interfaces (Redis, MySQL, Docker) exposed to 0.0.0.0.
+*   **Expected**: Web (80/443) and VoIP (3478/7880).
+*   **Unclassified**: Any other service listening globally is flagged as MEDIUM risk.
