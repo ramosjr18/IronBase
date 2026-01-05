@@ -27,7 +27,25 @@ Apply the baseline Ubuntu profile:
 
 ### 3. Scan a specific module
 ```bash
+# SSH Hardening
 ./cmd/ironbase scan --module ssh
+
+# Secure VPS (Comprehensive Assessment)
+./cmd/ironbase scan --module secure-vps
+```
+
+## Available Modules
+
+### `secure-vps`
+A self-contained module for assessing and securing public VPS instances.
+- **Internal Analysis**: Kernel, Users, SSH, Services, Permissions.
+- **External Simulation**: Exposure check, Public IP, Critical Ports.
+- **Safe Remediation**: Interactive `apply` mode with backups and safety locks.
+- **Reporting**: Generates a detailed `secure-vps-scan.txt` report.
+
+```bash
+# Run Interactive Fixes
+./cmd/ironbase apply --module secure-vps
 ```
 
 ## Documentation
