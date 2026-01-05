@@ -109,20 +109,45 @@ apply_fix_critical_ports() {
     while read -r line; do
         local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
         if [[ "$port" =~ $ports_crit ]]; then
-            echo -e "\n${C_RED}Exposed Critical Service detected on port $port${C_RESET}"
-            echo "Raw: $line"
+            echo -e "\n${C_RED}${C_BOLD}>>> Critical Exposure Detected: Port $port${C_RESET}"
+            echo "Evidence: $line"
             
             # Try to identify process
             local proc_info=""
             if [[ $EUID -eq 0 ]]; then
                 proc_info=$(ss -lntp | grep ":$port" | awk '{print $6}')
-                echo "Process info: $proc_info"
+                echo "Process: $proc_info"
             else
-                echo "(Run as root to see process names)"
+                echo "(Process name hidden: Run as root to see)"
             fi
 
-            echo "Options:"
-            echo "1) UFW Deny (Safe - Blocks external access)"
+            # Context-aware messaging
+            case "$port" in
+                6379)
+                    echo -e "\n${C_YELLOW}Context: Redis (often Coolify/Docker)${C_RESET}"
+                    echo " This service is likely intended for internal use only."
+                    echo " Warning: Public exposure allows anyone to connect (if no auth) or brute-force."
+                    echo " Recommendation: Block public access via firewall (Safe for containers)."
+                    ;;
+                5432|5433)
+                    echo -e "\n${C_YELLOW}Context: PostgreSQL Database${C_RESET}"
+                    echo " This may allow unauthenticated network access attempts or brute-force."
+                    echo " Recommendation: Block public access via firewall (Safe)."
+                    ;;
+                2377)
+                    echo -e "\n${C_RED}${C_BOLD}CRITICAL CONTEXT: Docker Swarm Management${C_RESET}"
+                    echo " This port controls the cluster. Public exposure allows remote takeover."
+                    echo " WARNING: This does not stop Docker, but restricts external access."
+                    echo " Recommendation: Block public access via firewall IMMEDIATELY."
+                    ;;
+                *)
+                    echo -e "\n${C_YELLOW}Context: Critical Internal Service${C_RESET}"
+                    echo " This service should likely not be reachable from the internet."
+                    ;;
+            esac
+
+            echo -e "\n${C_BOLD}Options:${C_RESET}"
+            echo "1) Block public access via UFW (Recommended - Safe)"
             echo "2) Skip"
             
             read -p "Choose action [1/2]: " choice
