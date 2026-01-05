@@ -20,7 +20,7 @@ Run as part of the IronBase suite:
 # Scan
 ./cmd/ironbase scan --module secure-vps
 
-# Apply Fixes (Manual Review Recommended first)
+# Apply Fixes (Interactive Mode - Safe)
 ./cmd/ironbase apply --module secure-vps
 ```
 
@@ -29,7 +29,11 @@ Run independently without the full IronBase engine:
 
 ```bash
 git sparse-checkout set modules/secure-vps
+# Scan
 ./modules/secure-vps/standalone.sh
+
+# Apply
+./modules/secure-vps/standalone.sh apply
 ```
 
 ## Report Output

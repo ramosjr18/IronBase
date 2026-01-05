@@ -40,7 +40,9 @@ module_scan() {
     return $?
 }
 
+source "$MODULE_ROOT/lib/apply.sh"
+
 module_apply() {
-    echo "APPLY: Secure VPS module is Read-Only. No auto-fixes available yet."
-    echo "Use manual remediation based on the report."
+    # Call the interactive remediation logic
+    run_apply
 }

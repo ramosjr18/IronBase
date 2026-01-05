@@ -14,17 +14,31 @@ source "$MODULE_ROOT/lib/network.sh"
 source "$MODULE_ROOT/scanners/internal.sh"
 source "$MODULE_ROOT/scanners/external.sh"
 
+# Load Apply Logic
+source "$MODULE_ROOT/lib/apply.sh"
+
+# Argument Parsing
+ACTION="scan"
+if [[ "$1" == "apply" ]] || [[ "$1" == "--apply" ]]; then
+    ACTION="apply"
+fi
+
 # Header
-echo -e "${C_BOLD}Secure-VPS Standalone Scanner${C_RESET}"
+echo -e "${C_BOLD}Secure-VPS Standalone${C_RESET}"
 echo "======================================"
 
-# Initialize Log
-init_log_file
+if [[ "$ACTION" == "apply" ]]; then
+    run_apply
+    exit $?
+else
+    # Initialize Log
+    init_log_file
 
-# Run Scans
-scan_internal
-scan_external
+    # Run Scans
+    scan_internal
+    scan_external
 
-# Summary
-print_summary
-exit $?
+    # Summary
+    print_summary
+    exit $?
+fi
