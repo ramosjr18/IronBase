@@ -56,27 +56,32 @@ apply_fix_ssh_root() {
     echo -e "\n${C_BOLD}>>> Finding: SSH Root Login Enabled (INT-SSH-001)${C_RESET}"
     echo -e "Risk: High. Root login allows direct brute-force attacks on superuser."
     
-    # Check for non-root sudoer
-    # Simple check: search /etc/group for sudo/wheel users that are not root
-    # This is rough but better than nothing.
+    # --- SSH Root Login Safety Check ---
     local sudoers=$(grep -E '^(sudo|wheel):' /etc/group | cut -d: -f4)
     local has_sudoer=0
+    local sudo_user_list=""
+    
     for user in ${sudoers//,/ }; do
         if [[ "$user" != "root" ]]; then
             has_sudoer=1
-            echo -e "Detected sudoer user: ${C_GREEN}$user${C_RESET}"
+            sudo_user_list="$sudo_user_list $user"
         fi
     done
 
     if [[ $has_sudoer -eq 0 ]]; then
-        echo -e "${C_RED}WARNING: No obvious non-root sudoer found in 'sudo' or 'wheel' groups.${C_RESET}"
-        echo -e "Disabling root login might lock you out if you don't have another way in."
-        if ! confirm_action "Do you REALLY want to disable PermitRootLogin?" "N"; then
-            log_apply "SKIP" "Skipped disabling root login (No sudoer verified/User cancelled)"
-            return
-        fi
+        echo -e "${C_RED}${C_BOLD}BLOCKING ACTION: No non-root sudoer user found.${C_RESET}"
+        echo -e "Disabling root login without an alternative user WILL lock you out."
+        echo -e "Action: ${C_RED}SKIPPING FIX (Safety Lock)${C_RESET}"
+        log_apply "SKIP" "Refused to disable root login: No sudoers found."
+        return
     else
-        if ! confirm_action "Disable 'PermitRootLogin' in /etc/ssh/sshd_config?" "Y"; then
+        echo -e "Detected sudo users:${C_GREEN}$sudo_user_list${C_RESET}"
+        echo "Action:"
+        echo "1) Disable root SSH login (RECOMMENDED)"
+        echo "2) Skip"
+        
+        read -p "Choose action [1/2]: " choice
+        if [[ "$choice" != "1" ]]; then
             log_apply "SKIP" "User skipped SSH Root Login fix"
             return
         fi
@@ -104,15 +109,33 @@ apply_fix_critical_ports() {
     # This regex must match the one in internal.sh/baseline.sh
     # Redis, Postgres, MySQL, Mongo, Elastic, Docker
     local ports_crit="^(6379|543[0-9]|3306|27017|9200|237[0-9])$"
-    local raw_exposed=$(ss -lntu | awk '$5 !~ /^127\.0\.0\.1/ && $5 !~ /^\[::1\]/ && NR>1 {print $0}')
+    local raw_all=$(ss -lntu | awk '$5 !~ /^127\.0\.0\.1/ && $5 !~ /^\[::1\]/ && NR>1 {print $0}')
+    local raw_critical=""
+    local raw_unclassified=""
 
+    # Split Critical vs Other
     while read -r line; do
         local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
         if [[ "$port" =~ $ports_crit ]]; then
+            raw_critical+="${line}\n"
+        else
+            # Filter out Expected ports (Web/VoIP) to just find "Unclassified"
+            local ports_expected="^(80|443|3478|7880|7881|22)$"
+            if [[ ! "$port" =~ $ports_expected ]]; then
+                raw_unclassified+="${line}\n"
+            fi
+        fi
+    done <<< "$raw_all"
+
+    # Handle Critical
+    if [[ -n "$raw_critical" && "$raw_critical" != "\n" ]]; then
+        while read -r line; do
+            [[ -z "$line" ]] && continue
+            local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
+            
             echo -e "\n${C_RED}${C_BOLD}>>> Critical Exposure Detected: Port $port${C_RESET}"
             echo "Evidence: $line"
             
-            # Try to identify process
             local proc_info=""
             if [[ $EUID -eq 0 ]]; then
                 proc_info=$(ss -lntp | grep ":$port" | awk '{print $6}')
@@ -124,25 +147,19 @@ apply_fix_critical_ports() {
             # Context-aware messaging
             case "$port" in
                 6379)
-                    echo -e "\n${C_YELLOW}Context: Redis (often Coolify/Docker)${C_RESET}"
-                    echo " This service is likely intended for internal use only."
-                    echo " Warning: Public exposure allows anyone to connect (if no auth) or brute-force."
-                    echo " Recommendation: Block public access via firewall (Safe for containers)."
+                    echo -e "\n${C_YELLOW}Context: Redis (likely Coolify/Docker)${C_RESET}"
+                    echo " Recommendation: Block public access via firewall."
                     ;;
                 5432|5433)
                     echo -e "\n${C_YELLOW}Context: PostgreSQL Database${C_RESET}"
-                    echo " This may allow unauthenticated network access attempts or brute-force."
-                    echo " Recommendation: Block public access via firewall (Safe)."
+                    echo " Recommendation: Block public access via firewall."
                     ;;
                 2377)
                     echo -e "\n${C_RED}${C_BOLD}CRITICAL CONTEXT: Docker Swarm Management${C_RESET}"
-                    echo " This port controls the cluster. Public exposure allows remote takeover."
-                    echo " WARNING: This does not stop Docker, but restricts external access."
                     echo " Recommendation: Block public access via firewall IMMEDIATELY."
                     ;;
                 *)
-                    echo -e "\n${C_YELLOW}Context: Critical Internal Service${C_RESET}"
-                    echo " This service should likely not be reachable from the internet."
+                    echo -e "\n${C_YELLOW}Context: Critical Service${C_RESET}"
                     ;;
             esac
 
@@ -159,7 +176,7 @@ apply_fix_critical_ports() {
                         log_apply "SUCCESS" "UFW denied port $port"
                         echo -e "${C_GREEN}Port $port blocked via UFW.${C_RESET}"
                     else
-                        echo -e "${C_RED}Error: UFW not found. Install UFW or configure iptables manually.${C_RESET}"
+                        echo -e "${C_RED}Error: UFW not found.${C_RESET}"
                         log_apply "ERROR" "UFW not found for port $port"
                     fi
                     ;;
@@ -168,9 +185,20 @@ apply_fix_critical_ports() {
                     echo "Skipping."
                     ;;
             esac
-        fi
-    done <<< "$raw_exposed"
-}
+        done <<< "$raw_critical"
+    else
+        echo "No Critical internal services exposed."
+    fi
+
+    # Handle Unclassified (INT-NET-001) - NO AUTO FIX
+    if [[ -n "$raw_unclassified" && "$raw_unclassified" != "\n" ]]; then
+        echo -e "\n${C_YELLOW}${C_BOLD}>>> Unclassified Services (INT-NET-001)${C_RESET}"
+        echo "The following services are exposed but unclassified:"
+        echo -e "$raw_unclassified"
+        echo -e "${C_BOLD}Action: Manual Review Required.${C_RESET}"
+        echo "These services require manual verification. No auto-fixes will be applied."
+        log_apply "INFO" "Unclassified services listed for manual review."
+    fi
 
 # apply_fix_writable_path Removed as per policy: 
 # "NO debe tener fix" for World Writable PATH (complex/high risk of breakage on valid symlinks/custom setups).
