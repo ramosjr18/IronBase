@@ -147,31 +147,9 @@ apply_fix_critical_ports() {
     done <<< "$raw_exposed"
 }
 
-apply_fix_writable_path() {
-    echo -e "\n${C_BOLD}>>> Finding: World Writable PATH (INT-SYS-003)${C_RESET}"
-    
-    local writable_dirs=$(echo $PATH | tr ':' '\n' | xargs -I {} find {} -maxdepth 0 -perm -002 2>/dev/null)
-    
-    if [[ -z "$writable_dirs" ]]; then
-        echo "No world-writable directories found in PATH. Good."
-        return
-    fi
-
-    echo -e "${C_RED}Found vulnerable directories:${C_RESET}"
-    echo "$writable_dirs"
-    
-    # Verify with ls -ld
-    echo "Permissions:"
-    echo "$writable_dirs" | xargs ls -ld
-
-    if confirm_action "Remove write permission for 'others' on these directories (chmod o-w)?" "N"; then
-        echo "$writable_dirs" | xargs chmod o-w
-        log_apply "SUCCESS" "Removed o+w from $writable_dirs"
-        echo -e "${C_GREEN}Fixed.${C_RESET}"
-    else
-        log_apply "SKIP" "Skipped chmod on writable dirs"
-    fi
-}
+# apply_fix_writable_path Removed as per policy: 
+# "NO debe tener fix" for World Writable PATH (complex/high risk of breakage on valid symlinks/custom setups).
+# User should fix manually based on report.
 
 # --- Main Apply Loop ---
 
@@ -190,8 +168,8 @@ run_apply() {
     # 2. Critical Ports Fix
     apply_fix_critical_ports
 
-    # 3. Writable Path Fix
-    apply_fix_writable_path
+    # 3. (Removed) Writable Path Fix
+    # Users check manual report for INT-SYS-003
 
     echo ""
     echo "-------------------------------------"

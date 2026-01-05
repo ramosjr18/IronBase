@@ -157,12 +157,48 @@ scan_internal() {
 
     # --- 4. System Anomalies ---
     # World Writable Dirs in PATH
-    local writable_dirs=$(echo $PATH | tr ':' '\n' | xargs -I {} find {} -maxdepth 0 -perm -002 2>/dev/null)
+    local writable_dirs=""
+    IFS=':' read -ra PATH_DIRS <<< "$PATH"
+    for dir in "${PATH_DIRS[@]}"; do
+        if [[ -d "$dir" ]]; then
+            # Resolve symlink to real path
+            local real_path=$(readlink -f "$dir" 2>/dev/null || echo "$dir")
+            
+            # Check permissions of start/real path using ls -ld (Portable)
+            # ls -ld output: drwxr-xr-x 2 root root 4096 ...
+            # We want the first column (perms).
+            local ls_out=$(ls -ld "$real_path" 2>/dev/null)
+            local perms=$(echo "$ls_out" | awk '{print $1}')
+            
+            # Helper: check for 'w' in world slots (last 3 chars of the permission string)
+            # drwxr-xr-x -> last 3 are r-x. Index 7,8,9 in 0-based index of a 10-char string.
+            # We specifically look for 'w' in the 9th position (8 index, but wait, usually 9 chars of perms + 1 type char = 10 chars)
+            # Type: d
+            # Owner: rwx
+            # Group: rwx
+            # Other: rwx
+            # String: drwxrwxrwx (10 chars)
+            # Indices: 0123456789
+            # "Other Write" is index 8 (9th character).
+            
+             if [[ "${perms:8:1}" == "w" ]]; then
+                 # Exclude sticky bit directories if appropriate? 
+                 # PATH dirs should usually NOT be sticky world writable like /tmp.
+                 # So flagging this is correct even if sticky.
+                 if [[ -z "$writable_dirs" ]]; then
+                     writable_dirs="$dir (-> $real_path)"
+                 else
+                     writable_dirs="$writable_dirs, $dir (-> $real_path)"
+                 fi
+             fi
+        fi
+    done
+
     if [[ -n "$writable_dirs" ]]; then
          add_vps_finding "INT-SYS-003" "$SEV_HIGH" "$TYPE_VULN" "$ORIGIN_INTERNAL" "System" \
             "World Writable Directory in PATH" \
-            "Directories in PATH are writable by others." \
+            "Directories in PATH are writable by others (Privilege Escalation Risk)." \
             "$writable_dirs" \
-            "Fix permissions on system directories (chmod o-w)."
+            "Fix permissions: chmod o-w <directory>"
     fi
 }
