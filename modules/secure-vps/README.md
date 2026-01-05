@@ -17,11 +17,15 @@ A self-contained security assessment module for public Linux VPS environments. T
 Run as part of the IronBase suite:
 
 ```bash
-# Scan
+# 1. Scan (Read-Only)
 ./cmd/ironbase scan --module secure-vps
 
-# Apply Fixes (Interactive Mode - Safe)
+# 2. Apply (Interactive - Safe by Default)
 ./cmd/ironbase apply --module secure-vps
+
+# 3. Apply Force (EMERGENCY ONLY)
+# WARNING: Bypasses safety checks. Use only with console access.
+./cmd/ironbase apply --module secure-vps --force
 ```
 
 ### Standalone Mode
@@ -29,12 +33,27 @@ Run independently without the full IronBase engine:
 
 ```bash
 git sparse-checkout set modules/secure-vps
+
 # Scan
 ./modules/secure-vps/standalone.sh
 
-# Apply
+# Apply (Interactive)
 ./modules/secure-vps/standalone.sh apply
+
+# Apply (Force)
+./modules/secure-vps/standalone.sh --force
 ```
+
+## Hardening Modes
+
+| Mode | Flag | Description | Safety |
+| :--- | :--- | :--- | :--- |
+| **Scan** | `scan` | Read-only assessment. | Non-destructive. |
+| **Apply** | `apply` | Interactive remediation. Prompts for every change. Backups enabled. | High. Prevents lockout. |
+| **Force** | `--force` | **Unsafe execution**. Bypasses prompts and locks. | **Low**. Use for emergency hardening. |
+
+> [!WARNING]
+> **Force Mode** (`--force`) will strictly apply all security rules. It may disable SSH Root login even if no alternative user is found, potentially locking you out. **Always ensure you have VNC/Console access before using this mode.**
 
 ## Report Output
 

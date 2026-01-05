@@ -19,9 +19,12 @@ source "$MODULE_ROOT/lib/apply.sh"
 
 # Argument Parsing
 ACTION="scan"
-if [[ "$1" == "apply" ]] || [[ "$1" == "--apply" ]]; then
-    ACTION="apply"
-fi
+for arg in "$@"; do
+    case "$arg" in
+        apply|--apply) ACTION="apply" ;;
+        --force) export IRONBASE_FORCE="true" ;;
+    esac
+done
 
 # Header
 echo -e "${C_BOLD}Secure-VPS Standalone${C_RESET}"

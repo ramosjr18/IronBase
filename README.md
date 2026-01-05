@@ -46,7 +46,13 @@ A self-contained module for assessing and securing public VPS instances.
 ```bash
 # Run Interactive Fixes
 ./cmd/ironbase apply --module secure-vps
+
+# Run Simulated Emergency Fixes (Force Mode)
+# WARNING: This bypasses safety checks and applies all fixes automatically.
+# Use only if you have console access or recovery options.
+./cmd/ironbase apply --module secure-vps --force
 ```
+
 
 ## Documentation
 

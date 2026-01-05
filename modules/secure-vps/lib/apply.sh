@@ -52,6 +52,8 @@ backup_file() {
 
 # --- Specific Remediations ---
 
+# --- Specific Remediations ---
+
 apply_fix_ssh_root() {
     echo -e "\n${C_BOLD}>>> Finding: SSH Root Login Enabled (INT-SSH-001)${C_RESET}"
     echo -e "Risk: High. Root login allows direct brute-force attacks on superuser."
@@ -68,22 +70,33 @@ apply_fix_ssh_root() {
         fi
     done
 
-    if [[ $has_sudoer -eq 0 ]]; then
-        echo -e "${C_RED}${C_BOLD}BLOCKING ACTION: No non-root sudoer user found.${C_RESET}"
-        echo -e "Disabling root login without an alternative user WILL lock you out."
-        echo -e "Action: ${C_RED}SKIPPING FIX (Safety Lock)${C_RESET}"
-        log_apply "SKIP" "Refused to disable root login: No sudoers found."
-        return
+    # Force Mode Bypass
+    if [[ "$IRONBASE_FORCE" == "true" ]]; then
+        echo -e "${C_RED}${C_BOLD}FORCE MODE ACTIVE: Disabling Root Login (Ignoring Safety Locks)${C_RESET}"
+        if [[ $has_sudoer -eq 0 ]]; then
+            echo -e "${C_RED}WARNING: Check for sudo users FAILED. You may be LOCKED OUT after this.${C_RESET}"
+        else
+            echo -e "Confirmed sudo users:${C_GREEN}$sudo_user_list${C_RESET}"
+        fi
     else
-        echo -e "Detected sudo users:${C_GREEN}$sudo_user_list${C_RESET}"
-        echo "Action:"
-        echo "1) Disable root SSH login (RECOMMENDED)"
-        echo "2) Skip"
-        
-        read -p "Choose action [1/2]: " choice
-        if [[ "$choice" != "1" ]]; then
-            log_apply "SKIP" "User skipped SSH Root Login fix"
+        # Normal Safety Logic
+        if [[ $has_sudoer -eq 0 ]]; then
+            echo -e "${C_RED}${C_BOLD}BLOCKING ACTION: No non-root sudoer user found.${C_RESET}"
+            echo -e "Disabling root login without an alternative user WILL lock you out."
+            echo -e "Action: ${C_RED}SKIPPING FIX (Safety Lock)${C_RESET}"
+            log_apply "SKIP" "Refused to disable root login: No sudoers found."
             return
+        else
+            echo -e "Detected sudo users:${C_GREEN}$sudo_user_list${C_RESET}"
+            echo "Action:"
+            echo "1) Disable root SSH login (RECOMMENDED)"
+            echo "2) Skip"
+            
+            read -p "Choose action [1/2]: " choice
+            if [[ "$choice" != "1" ]]; then
+                log_apply "SKIP" "User skipped SSH Root Login fix"
+                return
+            fi
         fi
     fi
 
@@ -97,7 +110,7 @@ apply_fix_ssh_root() {
         echo "PermitRootLogin no" >> "$ssh_config"
     fi
     
-    log_apply "SUCCESS" "Set PermitRootLogin no in $ssh_config"
+    log_apply "SUCCESS" "Set PermitRootLogin no in $ssh_config (Force=$IRONBASE_FORCE)"
     echo -e "${C_GREEN}Applied. Restart SSH service manually to take effect (systemctl restart ssh).${C_RESET}"
 }
 
@@ -163,17 +176,23 @@ apply_fix_critical_ports() {
                     ;;
             esac
 
-            echo -e "\n${C_BOLD}Options:${C_RESET}"
-            echo "1) Block public access via UFW (Recommended - Safe)"
-            echo "2) Skip"
+            # Force Mode: Auto-Apply Block
+            if [[ "$IRONBASE_FORCE" == "true" ]]; then
+                 echo -e "\n${C_RED}${C_BOLD}FORCE MODE: Applying UFW Block Automatically${C_RESET}"
+                 choice="1"
+            else
+                 echo -e "\n${C_BOLD}Options:${C_RESET}"
+                 echo "1) Block public access via UFW (Recommended - Safe)"
+                 echo "2) Skip"
+                 read -p "Choose action [1/2]: " choice
+            fi
             
-            read -p "Choose action [1/2]: " choice
             case "$choice" in
                 1)
                     if command -v ufw &> /dev/null; then
                         echo "Executing: ufw deny $port"
                         ufw deny "$port" >/dev/null
-                        log_apply "SUCCESS" "UFW denied port $port"
+                        log_apply "SUCCESS" "UFW denied port $port (Force=$IRONBASE_FORCE)"
                         echo -e "${C_GREEN}Port $port blocked via UFW.${C_RESET}"
                     else
                         echo -e "${C_RED}Error: UFW not found.${C_RESET}"
@@ -190,7 +209,7 @@ apply_fix_critical_ports() {
         echo "No Critical internal services exposed."
     fi
 
-    # Handle Unclassified (INT-NET-001) - NO AUTO FIX
+    # Handle Unclassified (INT-NET-001) - NO AUTO FIX EVEN IN FORCE MODE (As per rule: "NO aplicar fixes a findings sin remedicion definida")
     if [[ -n "$raw_unclassified" && "$raw_unclassified" != "\n" ]]; then
         echo -e "\n${C_YELLOW}${C_BOLD}>>> Unclassified Services (INT-NET-001)${C_RESET}"
         echo "The following services are exposed but unclassified:"
@@ -199,33 +218,67 @@ apply_fix_critical_ports() {
         echo "These services require manual verification. No auto-fixes will be applied."
         log_apply "INFO" "Unclassified services listed for manual review."
     fi
+}
 
-# apply_fix_writable_path Removed as per policy: 
-# "NO debe tener fix" for World Writable PATH (complex/high risk of breakage on valid symlinks/custom setups).
-# User should fix manually based on report.
+# apply_fix_writable_path Removed as per policy.
 
 # --- Main Apply Loop ---
 
 run_apply() {
-    echo -e "${C_BOLD}Starting Interactive Remediation${C_RESET}"
-    echo -e "${C_YELLOW}WARNING: You are about to modify system configurations.${C_RESET}"
-    echo -e "This tool will prompt for confirmation before every action."
+    init_apply_log
+    
+    if [[ "$IRONBASE_FORCE" == "true" ]]; then
+        echo -e "\n${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}!                  EMERGENCY HARDENING MODE (FORCE)                  !${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+        echo -e "${C_RED}WARNING: You have requested to FORCE apply all security fixes.${C_RESET}"
+        echo -e "${C_RED}This will:${C_RESET}"
+        echo -e "${C_RED}  - DISABLE internal safety locks (SSH root login check, etc.)${C_RESET}"
+        echo -e "${C_RED}  - MODIFY critical configurations.${C_RESET}"
+        echo -e "${C_RED}  - POTENTIALLY disrupt production services or SSH access.${C_RESET}"
+        echo -e ""
+        echo -e "This action is potentially disruptive and should only be used in emergencies"
+        echo -e "or if you have console access/recovery options."
+        echo -e ""
+        echo -e "This will APPLY ALL security fixes without further confirmation."
+        echo -e "Do you want to continue? (y/N): "
+        
+        read -p "Confirm FORCE execution (y/N): " force_confirm
+        if [[ ! "$force_confirm" =~ ^[Yy]$ ]]; then
+            echo "Aborting Force Mode."
+            log_apply "ABORT" "User aborted Force Mode at warning screen."
+            return 1
+        fi
+        
+        log_apply "FORCE_START" "User confirmed Force Mode execution."
+        echo -e "${C_BOLD}>>> STARTING FORCED HARDENING <<<${C_RESET}"
+    else
+        # Normal Mode Header
+        echo -e "${C_BOLD}Starting Interactive Remediation${C_RESET}"
+        echo -e "${C_YELLOW}WARNING: You are about to modify system configurations.${C_RESET}"
+        echo -e "This tool will prompt for confirmation before every action."
+    fi
+
     echo -e "A log will be saved to: $APPLY_LOG"
     echo ""
-    
-    init_apply_log
 
-    # 1. SSH Root Fix
-    apply_fix_ssh_root
-
-    # 2. Critical Ports Fix
+    # 1. Critical Ports Fix (Highest Priority)
+    # Order changed as requested: Firewall/Network first.
     apply_fix_critical_ports
+
+    # 2. SSH Root Fix
+    apply_fix_ssh_root
 
     # 3. (Removed) Writable Path Fix
     # Users check manual report for INT-SYS-003
 
     echo ""
     echo "-------------------------------------"
-    echo -e "${C_BOLD}Remediation Complete.${C_RESET}"
-    echo "Please review $APPLY_LOG"
+    if [[ "$IRONBASE_FORCE" == "true" ]]; then
+        echo -e "${C_RED}${C_BOLD}Forced Hardening Complete.${C_RESET}"
+        echo "Mode: FORCE | Log saved at: $APPLY_LOG"
+    else
+        echo -e "${C_BOLD}Remediation Complete.${C_RESET}"
+        echo "Please review $APPLY_LOG"
+    fi
 }

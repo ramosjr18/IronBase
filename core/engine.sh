@@ -66,6 +66,7 @@ engine_main() {
         case $1 in
             --module) target_module="$2"; shift ;;
             --profile) profile_path="$2"; shift ;;
+            --force) export IRONBASE_FORCE="true" ;;
             *) ;;
         esac
         shift
