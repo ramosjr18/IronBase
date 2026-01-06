@@ -43,6 +43,12 @@ A self-contained module for assessing and securing public VPS instances.
 - **Safe Remediation**: Interactive `apply` mode with backups and safety locks.
 - **Reporting**: Generates a detailed `secure-vps-scan.txt` report.
 
+### `secure-ssh`
+A focused module for safe SSH hardening.
+- **Interactive Wizard**: Step-by-step user creation and root disabling.
+- **Safety First**: Verified alternative access before blocking root.
+- **Standalone**: Can be run on any machine independently.
+
 ```bash
 # Run Interactive Fixes
 ./cmd/ironbase apply --module secure-vps

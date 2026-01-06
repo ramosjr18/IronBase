@@ -11,6 +11,9 @@ A self-contained security assessment module for public Linux VPS environments. T
 *   **Actionable Reporting**: Provides clear **Recommendations** and **Evidence** for every finding.
 *   **Auto-generated Report**: Saves a full detail report to `secure-vps-scan.txt` after every run.
 
+*   **Auto-generated Report**: Saves a full detail report to `secure-vps-scan.txt` after every run.
+*   **Integrated SSH Hardening**: Leverages the robust `secure-ssh` wizard for safe user creation and access management.
+
 ## Usage
 
 ### Integrated Mode (IronBase)
