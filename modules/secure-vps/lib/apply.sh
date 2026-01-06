@@ -29,7 +29,7 @@ confirm_action() {
     local options="[y/N]"
     if [[ "$default" == "Y" ]]; then options="[Y/n]"; fi
 
-    read -p "$(echo -e "${C_YELLOW}$prompt $options${C_RESET} "): " response
+    read -p "$(echo -e "${C_YELLOW}$prompt $options${C_RESET} "): " response < /dev/tty
     response=${response:-$default}
 
     if [[ "$response" =~ ^[Yy]$ ]]; then
@@ -92,7 +92,7 @@ apply_fix_ssh_root() {
             echo "1) Disable root SSH login (RECOMMENDED)"
             echo "2) Skip"
             
-            read -p "Choose action [1/2]: " choice
+            read -p "Choose action [1/2]: " choice < /dev/tty
             if [[ "$choice" != "1" ]]; then
                 log_apply "SKIP" "User skipped SSH Root Login fix"
                 return
@@ -176,16 +176,15 @@ apply_fix_critical_ports() {
                     ;;
             esac
 
-            # Force Mode: Auto-Apply Block
-            if [[ "$IRONBASE_FORCE" == "true" ]]; then
-                 echo -e "\n${C_RED}${C_BOLD}FORCE MODE: Applying UFW Block Automatically${C_RESET}"
-                 choice="1"
-            else
-                 echo -e "\n${C_BOLD}Options:${C_RESET}"
-                 echo "1) Block public access via UFW (Recommended - Safe)"
-                 echo "2) Skip"
-                 read -p "Choose action [1/2]: " choice
-            fi
+        if [[ "$IRONBASE_FORCE" == "true" ]]; then
+             echo -e "\n${C_RED}${C_BOLD}FORCE MODE: Applying UFW Block Automatically${C_RESET}"
+             choice="1"
+        else
+             echo -e "\n${C_BOLD}Options:${C_RESET}"
+             echo "1) Block public access via UFW (Recommended - Safe)"
+             echo "2) Skip"
+             read -p "Choose action [1/2]: " choice < /dev/tty
+        fi
             
             case "$choice" in
                 1)
@@ -243,7 +242,7 @@ run_apply() {
         echo -e "This will APPLY ALL security fixes without further confirmation."
         echo -e "Do you want to continue? (y/N): "
         
-        read -p "Confirm FORCE execution (y/N): " force_confirm
+        read -p "Confirm FORCE execution (y/N): " force_confirm < /dev/tty
         if [[ ! "$force_confirm" =~ ^[Yy]$ ]]; then
             echo "Aborting Force Mode."
             log_apply "ABORT" "User aborted Force Mode at warning screen."
