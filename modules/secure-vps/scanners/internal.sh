@@ -83,7 +83,13 @@ scan_internal() {
         local raw_exposed=$(ss -lntu | awk '$5 !~ /^127\.0\.0\.1/ && $5 !~ /^\[::1\]/ && NR>1 {print $0}')
         
         if [[ -n "$raw_exposed" ]]; then
+            local ufw_active=0
+            if command -v ufw &> /dev/null && sudo ufw status | grep -q "Status: active"; then
+                ufw_active=1
+            fi
+            
             local list_critical=""
+            local list_mitigated="" # New: For firewall-blocked services
             local list_expected=""
             local list_unknown=""
             
@@ -96,7 +102,21 @@ scan_internal() {
                 local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
                 
                 if [[ "$port" =~ $ports_critical ]]; then
-                    list_critical+="${line}\n"
+                    # Check for UFW mitigation
+                    local is_blocked=0
+                    if [[ $ufw_active -eq 1 ]]; then
+                        # Check if port is explicitly DENY or REJECT in ufw status
+                        # Regex matches start of line with port, optional protocol, whitespace, then DENY/REJECT
+                        if sudo ufw status | grep -E "^$port(/tcp|/udp)?\s+(DENY|REJECT)" &> /dev/null; then
+                            is_blocked=1
+                        fi
+                    fi
+
+                    if [[ $is_blocked -eq 1 ]]; then
+                        list_mitigated+="${line}\n"
+                    else
+                        list_critical+="${line}\n"
+                    fi
                 elif [[ "$port" =~ $ports_expected ]]; then
                     list_expected+="${line}\n"
                 else
@@ -104,13 +124,22 @@ scan_internal() {
                 fi
             done <<< "$raw_exposed"
 
-            # 2a. Critical/Internal Services Exposed
+            # 2a. Critical/Internal Services Exposed (True Positives)
             if [[ -n "$list_critical" ]]; then
                  add_vps_finding "INT-NET-002" "$SEV_CRITICAL" "$TYPE_RISK" "$ORIGIN_INTERNAL" "Network" \
-                    "Critical Internal Services Exposed" \
-                    "Services usually meant for internal use (DB, Docker) are listening externally." \
+                    "Critical Internal Services Exposed (Verified)" \
+                    "Services usually meant for internal use are listening externally AND NOT blocked by firewall." \
                     "$(echo -e $list_critical)" \
-                    "IMMEDIATE ACTION: Bind these services to 127.0.0.1 or use a Firewall/VPN."
+                    "IMMEDIATE ACTION: Bind these services to 127.0.0.1 or block via UFW ('ufw deny <port>')."
+            fi
+
+            # 2b. Mitigated Services (Firewall Blocked)
+            if [[ -n "$list_mitigated" ]]; then
+                 add_vps_finding "INT-NET-002-M" "$SEV_INFO" "$TYPE_INFO" "$ORIGIN_INTERNAL" "Network" \
+                    "Critical Internal Services (Mitigated)" \
+                    "Services are listening on public interfaces but are BLOCKED by UFW." \
+                    "$(echo -e $list_mitigated)" \
+                    "Note: Defense-in-depth recommends binding to localhost even if firewalled."
             fi
 
             # 2b. Expected/Public Services
