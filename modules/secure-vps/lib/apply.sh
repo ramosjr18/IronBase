@@ -140,19 +140,42 @@ apply_fix_critical_ports() {
         fi
     done <<< "$raw_all"
 
-    # Handle Critical
+    # Split Critical vs Other
+    # Collect Critical RAW lines only first
+    while read -r line; do
+        local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
+        if [[ "$port" =~ $ports_crit ]]; then
+            raw_critical+="${line}\n"
+        else
+            # Filter out Expected ports (Web/VoIP) to just find "Unclassified"
+            local ports_expected="^(80|443|3478|7880|7881|22)$"
+            if [[ ! "$port" =~ $ports_expected ]]; then
+                raw_unclassified+="${line}\n"
+            fi
+        fi
+    done <<< "$raw_all"
+
+    # Handle Critical (Deduplicated Logic)
     if [[ -n "$raw_critical" && "$raw_critical" != "\n" ]]; then
-        while read -r line; do
-            [[ -z "$line" ]] && continue
-            local port=$(echo "$line" | awk '{print $5}' | awk -F: '{print $NF}')
+        # 1. Extract Unique Ports
+        local ports_unique=$(echo -e "$raw_critical" | awk '{print $5}' | awk -F: '{print $NF}' | sort -u)
+        
+        # 2. Iterate per Logic Port
+        for port in $ports_unique; do
+            [[ -z "$port" ]] && continue
             
             echo -e "\n${C_RED}${C_BOLD}>>> Critical Exposure Detected: Port $port${C_RESET}"
-            echo "Evidence: $line"
             
+            # Show all evidence for this port
+            local evidence=$(echo -e "$raw_critical" | grep ":$port")
+            echo "Evidence:"
+            echo "$evidence"
+
+            # Try to identify process (just once per port, usually sufficient context)
             local proc_info=""
             if [[ $EUID -eq 0 ]]; then
-                proc_info=$(ss -lntp | grep ":$port" | awk '{print $6}')
-                echo "Process: $proc_info"
+                proc_info=$(ss -lntp | grep ":$port" | head -n 1 | awk '{print $6}')
+                echo "Process (Primary): $proc_info"
             else
                 echo "(Process name hidden: Run as root to see)"
             fi
@@ -176,15 +199,16 @@ apply_fix_critical_ports() {
                     ;;
             esac
 
-        if [[ "$IRONBASE_FORCE" == "true" ]]; then
-             echo -e "\n${C_RED}${C_BOLD}FORCE MODE: Applying UFW Block Automatically${C_RESET}"
-             choice="1"
-        else
-             echo -e "\n${C_BOLD}Options:${C_RESET}"
-             echo "1) Block public access via UFW (Recommended - Safe)"
-             echo "2) Skip"
-             read -p "Choose action [1/2]: " choice < /dev/tty
-        fi
+            # Action Prompt
+            if [[ "$IRONBASE_FORCE" == "true" ]]; then
+                 echo -e "\n${C_RED}${C_BOLD}FORCE MODE: Applying UFW Block Automatically${C_RESET}"
+                 choice="1"
+            else
+                 echo -e "\n${C_BOLD}Options:${C_RESET}"
+                 echo "1) Block public access via UFW (Recommended - Safe)"
+                 echo "2) Skip"
+                 read -p "Choose action [1/2]: " choice < /dev/tty
+            fi
             
             case "$choice" in
                 1)
@@ -203,7 +227,7 @@ apply_fix_critical_ports() {
                     echo "Skipping."
                     ;;
             esac
-        done <<< "$raw_critical"
+        done
     else
         echo "No Critical internal services exposed."
     fi
