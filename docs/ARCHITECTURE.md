@@ -13,10 +13,10 @@ IronBase is a modular, future-proof Linux hardening engine. While v0 is implemen
 
 ```mermaid
 graph TD
-    Profile[Profile (YAML)] -->|Config| Core[Core Engine (Bash)]
-    Core -->|Orchestrates| Modules[Modules (Bash)]
-    Modules -->|Returns| Findings[Findings Model]
-    Core -->|Aggregates| Report[Report]
+    Profile["Profile (YAML)"] -->|Config| Core["Core Engine (Bash)"]
+    Core -->|Orchestrates| Modules["Modules (Bash)"]
+    Modules -->|Returns| Findings["Findings Model"]
+    Core -->|Aggregates| Report["Report"]
     
     subgraph "Core Engine"
     Core
@@ -75,9 +75,9 @@ modules:
 
 ```mermaid
 flowchart LR
-    P1[Phase 1: Bash CLI] --> P2[Phase 2: Go Core]
-    P2 --> P3[Phase 3: API Layer]
-    P3 --> P4[Phase 4: Web GUI]
+    P1["Phase 1: Bash CLI"] --> P2["Phase 2: Go Core"]
+    P2 --> P3["Phase 3: API Layer"]
+    P3 --> P4["Phase 4: Web GUI"]
     
     style P1 fill:#f9f,stroke:#333
     style P2 fill:#ccf,stroke:#333
