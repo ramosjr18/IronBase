@@ -11,6 +11,28 @@ IronBase is a modular, future-proof Linux hardening engine. While v0 is implemen
 
 ## System Components
 
+```mermaid
+graph TD
+    Profile[Profile (YAML)] -->|Config| Core[Core Engine (Bash)]
+    Core -->|Orchestrates| Modules[Modules (Bash)]
+    Modules -->|Returns| Findings[Findings Model]
+    Core -->|Aggregates| Report[Report]
+    
+    subgraph "Core Engine"
+    Core
+    end
+    
+    subgraph "Modules Layer"
+    Modules
+    end
+    
+    subgraph "Data Contracts"
+    Profile
+    Findings
+    end
+```
+
+
 ### 1. The Core Engine (`core/`)
 The brain of IronBase. It is responsible for:
 -   **Orchestration**: Loading modules and executing them in the correct order.
@@ -50,6 +72,19 @@ modules:
 ```
 
 ## Future Evolution Path
+
+```mermaid
+flowchart LR
+    P1[Phase 1: Bash CLI] --> P2[Phase 2: Go Core]
+    P2 --> P3[Phase 3: API Layer]
+    P3 --> P4[Phase 4: Web GUI]
+    
+    style P1 fill:#f9f,stroke:#333
+    style P2 fill:#ccf,stroke:#333
+    style P3 fill:#cfc,stroke:#333
+    style P4 fill:#ffc,stroke:#333
+```
+
 
 -   **Phase 1 (Now)**: Bash-based architecture, CLI only, Expanded Read-Only Scan.
 -   **Phase 2**: Port `core/` to Go. Modules can remain in Bash (executed by Go) or be rewritten in Go.
