@@ -240,18 +240,6 @@ MIT License. Free and Open Source forever.
 
 ---
 
-## ⭐ Star History
-
-<a href="https://star-history.com/#ramosjr18/ironbase&Timeline">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ramosjr18/ironbase&type=Timeline&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ramosjr18/ironbase&type=Timeline" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=ramosjr18/ironbase&type=Timeline" />
- </picture>
-</a>
-
----
-
 ## 👤 Author
 
 **Daniel Ramos**
