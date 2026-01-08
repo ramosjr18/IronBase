@@ -25,3 +25,4 @@ build/
 # (None yet, shell scripts are source)
 estado_actual.md
 *.txt
+vulnerability-module.md
