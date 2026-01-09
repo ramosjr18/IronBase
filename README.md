@@ -149,6 +149,7 @@ Host-based vulnerability assessment using Ubuntu Security Notices (USN).
 ### 🔧 Additional Modules
 - **`system`**: OS, Kernel, Updates, Time configuration
 - **`users`**: Privileges, Sudoers, Root access management
+  - **List Users**: `./cmd/ironbase scan --module users --list` - Display all system users with privilege levels (ROOT/SUDO/USER), UID/GID, shell, home directory, and account status
 - **`network`**: Ports, Binding, IPv6 configuration
 - **`firewall`**: UFW Status & Policies
 - **`ssh`**: SSH configuration hardening
