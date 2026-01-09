@@ -39,7 +39,14 @@ run_module() {
     
     log_info "Running module: $mod_name ($module_name)"
     
-    if [[ "$action" == "scan" ]]; then
+    # Check if list mode is enabled
+    if [[ "$IRONBASE_LIST_MODE" == "true" ]]; then
+        if declare -f module_list > /dev/null; then
+            module_list
+        else
+            log_warn "Module $mod_name does not support --list mode"
+        fi
+    elif [[ "$action" == "scan" ]]; then
         module_scan
         local result=$?
         if [[ $result -eq 0 ]]; then
@@ -67,6 +74,7 @@ engine_main() {
             --module) target_module="$2"; shift ;;
             --profile) profile_path="$2"; shift ;;
             --force) export IRONBASE_FORCE="true" ;;
+            --list) export IRONBASE_LIST_MODE="true" ;;
             *) ;;
         esac
         shift

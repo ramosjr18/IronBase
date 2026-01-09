@@ -96,6 +96,72 @@ module_scan() {
     return 0
 }
 
+module_list() {
+    echo ""
+    echo "=== System Users and Privileges ==="
+    echo ""
+    
+    # Header
+    printf "%-16s %-8s %-8s %-12s %-20s %-20s %-10s\n" \
+        "USERNAME" "UID" "GID" "PRIVILEGE" "SHELL" "HOME" "STATUS"
+    printf "%-16s %-8s %-8s %-12s %-20s %-20s %-10s\n" \
+        "--------" "---" "---" "---------" "-----" "----" "------"
+    
+    # Read /etc/passwd
+    while IFS=: read -r username _ uid gid _ home shell; do
+        # Determine privilege level
+        local privilege="USER"
+        local status="ACTIVE"
+        
+        # Check if UID 0 (root)
+        if [[ "$uid" -eq 0 ]]; then
+            privilege="ROOT"
+        else
+            # Check if user is in sudo/admin groups
+            if groups "$username" 2>/dev/null | grep -qE '\b(sudo|admin|wheel)\b'; then
+                privilege="SUDO"
+            fi
+        fi
+        
+        # Check account status from /etc/shadow if readable
+        if [[ -r /etc/shadow ]]; then
+            local shadow_entry
+            shadow_entry=$(grep "^${username}:" /etc/shadow 2>/dev/null)
+            if [[ -n "$shadow_entry" ]]; then
+                local password_field
+                password_field=$(echo "$shadow_entry" | cut -d: -f2)
+                if [[ "$password_field" == "!"* ]] || [[ "$password_field" == "*" ]] || [[ "$password_field" == "!!" ]]; then
+                    status="LOCKED"
+                fi
+            fi
+        fi
+        
+        # Truncate long paths for display
+        local display_shell="${shell##*/}"
+        local display_home="$home"
+        if [[ ${#display_home} -gt 20 ]]; then
+            display_home="...${display_home: -17}"
+        fi
+        
+        # Print user info
+        printf "%-16s %-8s %-8s %-12s %-20s %-20s %-10s\n" \
+            "$username" "$uid" "$gid" "$privilege" "$display_shell" "$display_home" "$status"
+            
+    done < /etc/passwd
+    
+    echo ""
+    echo "Legend:"
+    echo "  ROOT  - User with UID 0 (superuser)"
+    echo "  SUDO  - User in sudo/admin/wheel group"
+    echo "  USER  - Regular user without elevated privileges"
+    echo ""
+    
+    if [[ ! -r /etc/shadow ]]; then
+        echo "Note: Run with sudo to see account lock status"
+        echo ""
+    fi
+}
+
 module_apply() {
     # No apply logic for this module check
     :
