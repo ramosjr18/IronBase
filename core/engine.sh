@@ -42,11 +42,25 @@ run_module() {
     register_module "$module_name"
     
     # Set module-specific log paths in run directory
-    export VPS_LOG_FILE="$IRONBASE_RUN_DIR/secure-vps.log"
-    export VULN_LOG_FILE="$IRONBASE_RUN_DIR/vulnerability.log"
-    export VPS_APPLY_LOG="$IRONBASE_RUN_DIR/secure-vps-apply.log"
-    # SSH module uses VPS_LOG_FILE (shared from secure-vps pattern)
-    # Firewall module uses VPS_APPLY_LOG pattern
+    # Only set if IRONBASE_RUN_DIR is defined (defensive: prevent /path/to/log)
+    if [[ -n "$IRONBASE_RUN_DIR" ]] && [[ -d "$IRONBASE_RUN_DIR" ]]; then
+        export VPS_LOG_FILE="$IRONBASE_RUN_DIR/secure-vps.log"
+        export VULN_LOG_FILE="$IRONBASE_RUN_DIR/vulnerability.log"
+        export VPS_APPLY_LOG="$IRONBASE_RUN_DIR/secure-vps-apply.log"
+        export FIREWALL_APPLY_LOG="$IRONBASE_RUN_DIR/firewall-apply.log"
+        export SSH_LOG_FILE="$IRONBASE_RUN_DIR/ssh.log"
+        export SSH_APPLY_LOG="$IRONBASE_RUN_DIR/ssh-apply.log"
+    else
+        # Fallback to legacy paths (for standalone mode or when reporting not initialized)
+        export VPS_LOG_FILE="${VPS_LOG_FILE:-secure-vps-scan.txt}"
+        export VULN_LOG_FILE="${VULN_LOG_FILE:-vulnerability-scan.txt}"
+        export VPS_APPLY_LOG="${VPS_APPLY_LOG:-secure-vps-apply.log}"
+        export FIREWALL_APPLY_LOG="${FIREWALL_APPLY_LOG:-firewall-apply.log}"
+        export SSH_LOG_FILE="${SSH_LOG_FILE:-ssh-scan.txt}"
+        export SSH_APPLY_LOG="${SSH_APPLY_LOG:-ssh-apply.log}"
+    fi
+    # SSH module uses VPS_LOG_FILE (shared from secure-vps pattern) but can override with SSH_LOG_FILE
+    # Firewall module uses VPS_APPLY_LOG pattern but can override with FIREWALL_APPLY_LOG
     
     log_info "Running module: $mod_name ($module_name)"
     
@@ -97,6 +111,9 @@ engine_main() {
     log_info "Profile: $profile_path"
     
     # Initialize reporting system
+    # Export IRONBASE_ROOT so init_reporting can use it
+    export IRONBASE_ROOT
+    
     local flags_str=""
     [[ "$IRONBASE_FORCE" == "true" ]] && flags_str="${flags_str} --force"
     [[ "$IRONBASE_BOOTSTRAP" == "true" ]] && flags_str="${flags_str} --bootstrap"
@@ -104,6 +121,12 @@ engine_main() {
     
     local run_dir=$(init_reporting "$action" "$profile_path" "$flags_str")
     log_info "Output directory: $run_dir"
+    
+    # Verify initialization succeeded
+    if [[ -z "$run_dir" ]] || [[ ! -d "$run_dir" ]]; then
+        log_error "Failed to initialize reporting system. Run directory: $run_dir"
+        return 1
+    fi
 
     # Discover modules
     local modules=()
@@ -135,22 +158,29 @@ engine_main() {
     done
     
     # Generate final reports (returns exit code)
-    log_info "Generating reports..."
-    generate_reports
-    local exit_code=$?
-    
-    # Show summary (clean console output)
-    if [[ -f "$GLOBAL_RUN_DIR/summary.txt" ]]; then
-        echo ""
-        cat "$GLOBAL_RUN_DIR/summary.txt"
-    fi
-    
-    log_info "Execution completed."
-    log_info "Reports saved to: $GLOBAL_RUN_DIR"
-    
-    # Cleanup temporary findings file
-    if [[ -n "$GLOBAL_FINDINGS_FILE" ]] && [[ -f "$GLOBAL_FINDINGS_FILE" ]]; then
-        rm -f "$GLOBAL_FINDINGS_FILE" 2>/dev/null || true
+    # Only generate reports if reporting was initialized successfully
+    local exit_code=0
+    if [[ -n "$IRONBASE_RUN_DIR" ]] && [[ -d "$IRONBASE_RUN_DIR" ]]; then
+        log_info "Generating reports..."
+        generate_reports
+        exit_code=$?
+        
+        # Show summary (clean console output)
+        if [[ -f "$IRONBASE_RUN_DIR/summary.txt" ]]; then
+            echo ""
+            cat "$IRONBASE_RUN_DIR/summary.txt"
+        fi
+        
+        log_info "Execution completed."
+        log_info "Reports saved to: $IRONBASE_RUN_DIR"
+        
+        # Cleanup temporary findings file
+        if [[ -f "$IRONBASE_RUN_DIR/.findings.tmp" ]]; then
+            rm -f "$IRONBASE_RUN_DIR/.findings.tmp" 2>/dev/null || true
+        fi
+    else
+        log_warn "Reporting system not initialized. Global reports will not be generated."
+        log_info "Execution completed."
     fi
     
     return $exit_code

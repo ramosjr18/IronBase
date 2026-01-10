@@ -474,10 +474,12 @@ module_apply() {
     
     # Initialize helpers (fallback definitions if not available)
     # Use run directory if available, otherwise fallback to current directory
-    if [[ -n "$IRONBASE_RUN_DIR" ]]; then
-        local APPLY_LOG="${VPS_APPLY_LOG:-$IRONBASE_RUN_DIR/firewall-apply.log}"
+    # Defensive: ensure IRONBASE_RUN_DIR is a valid directory before using it
+    if [[ -n "$IRONBASE_RUN_DIR" ]] && [[ -d "$IRONBASE_RUN_DIR" ]] && [[ "$IRONBASE_RUN_DIR" != "/" ]]; then
+        local APPLY_LOG="${FIREWALL_APPLY_LOG:-${VPS_APPLY_LOG:-$IRONBASE_RUN_DIR/firewall-apply.log}}"
     else
-        local APPLY_LOG="${VPS_APPLY_LOG:-firewall-apply.log}"
+        # Fallback to legacy paths or current directory (standalone mode)
+        local APPLY_LOG="${FIREWALL_APPLY_LOG:-${VPS_APPLY_LOG:-firewall-apply.log}}"
     fi
     
     init_apply_log() {

@@ -5,10 +5,13 @@
 
 # Output File
 # Use run directory if available, otherwise fallback to current directory
-if [[ -n "$IRONBASE_RUN_DIR" ]]; then
-    LOG_FILE="${VPS_LOG_FILE:-$IRONBASE_RUN_DIR/ssh.log}"
+# Defensive: ensure IRONBASE_RUN_DIR is a valid directory before using it
+if [[ -n "$IRONBASE_RUN_DIR" ]] && [[ -d "$IRONBASE_RUN_DIR" ]] && [[ "$IRONBASE_RUN_DIR" != "/" ]]; then
+    # Use SSH_LOG_FILE if set, otherwise use module-specific log file
+    LOG_FILE="${SSH_LOG_FILE:-${VPS_LOG_FILE:-$IRONBASE_RUN_DIR/ssh.log}}"
 else
-    LOG_FILE="${VPS_LOG_FILE:-ssh-scan.txt}"
+    # Fallback to legacy paths or current directory (standalone mode)
+    LOG_FILE="${SSH_LOG_FILE:-${VPS_LOG_FILE:-ssh-scan.txt}}"
 fi
 
 # Counters

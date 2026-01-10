@@ -22,7 +22,14 @@ init_reporting() {
     GLOBAL_RUN_ID=$(date +"%Y-%m-%d_%H-%M-%S")
     
     # Create output directory structure
-    local output_dir="$(dirname "$0")/../output"
+    # Use IRONBASE_ROOT from engine if available, otherwise calculate from BASH_SOURCE
+    local root_dir="${IRONBASE_ROOT:-}"
+    if [[ -z "$root_dir" ]]; then
+        # Fallback: calculate from reporting.sh location
+        local script_path="${BASH_SOURCE[0]}"
+        root_dir="$(cd "$(dirname "$script_path")/.." && pwd)"
+    fi
+    local output_dir="$root_dir/output"
     GLOBAL_RUN_DIR="$output_dir/runs/$GLOBAL_RUN_ID"
     
     # Create directories
@@ -121,9 +128,21 @@ register_finding() {
 # Generate final reports
 # Returns exit code from summary (0=passed, 1=failed)
 generate_reports() {
-    if [[ -z "$GLOBAL_RUN_DIR" ]] || [[ ! -d "$GLOBAL_RUN_DIR" ]]; then
-        echo "Error: Run directory not initialized" >&2
+    # Use exported IRONBASE_RUN_DIR (always available if init_reporting was called)
+    # Fallback to GLOBAL_RUN_DIR for backwards compatibility
+    local run_dir="${IRONBASE_RUN_DIR:-${GLOBAL_RUN_DIR:-}}"
+    
+    if [[ -z "$run_dir" ]] || [[ ! -d "$run_dir" ]]; then
+        echo "Error: Run directory not initialized. IRONBASE_RUN_DIR=$IRONBASE_RUN_DIR, GLOBAL_RUN_DIR=$GLOBAL_RUN_DIR" >&2
         return 1
+    fi
+    
+    # Synchronize GLOBAL_RUN_DIR with IRONBASE_RUN_DIR (ensure consistency)
+    GLOBAL_RUN_DIR="$run_dir"
+    
+    # Also ensure GLOBAL_FINDINGS_FILE is set correctly
+    if [[ -z "$GLOBAL_FINDINGS_FILE" ]]; then
+        GLOBAL_FINDINGS_FILE="$GLOBAL_RUN_DIR/.findings.tmp"
     fi
     
     # Generate JSON report

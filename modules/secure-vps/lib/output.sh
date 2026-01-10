@@ -5,9 +5,11 @@
 
 # Output File
 # Use run directory if available, otherwise fallback to current directory
-if [[ -n "$IRONBASE_RUN_DIR" ]]; then
+# Defensive: ensure IRONBASE_RUN_DIR is a valid directory before using it
+if [[ -n "$IRONBASE_RUN_DIR" ]] && [[ -d "$IRONBASE_RUN_DIR" ]] && [[ "$IRONBASE_RUN_DIR" != "/" ]]; then
     LOG_FILE="${VPS_LOG_FILE:-$IRONBASE_RUN_DIR/secure-vps.log}"
 else
+    # Fallback to legacy paths or current directory (standalone mode)
     LOG_FILE="${VPS_LOG_FILE:-secure-vps-scan.txt}"
 fi
 

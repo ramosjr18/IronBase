@@ -4,9 +4,11 @@
 # Handles interactive remediation
 
 # Use run directory if available, otherwise fallback to current directory
-if [[ -n "$IRONBASE_RUN_DIR" ]]; then
+# Defensive: ensure IRONBASE_RUN_DIR is a valid directory before using it
+if [[ -n "$IRONBASE_RUN_DIR" ]] && [[ -d "$IRONBASE_RUN_DIR" ]] && [[ "$IRONBASE_RUN_DIR" != "/" ]]; then
     APPLY_LOG="${VPS_APPLY_LOG:-$IRONBASE_RUN_DIR/secure-vps-apply.log}"
 else
+    # Fallback to legacy paths or current directory (standalone mode)
     APPLY_LOG="${VPS_APPLY_LOG:-secure-vps-apply.log}"
 fi
 
