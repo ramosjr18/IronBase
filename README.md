@@ -233,10 +233,10 @@ All modules include comprehensive technical documentation with:
 - **[Users Module](modules/users/README.md)**: User and privilege checks
 - **[Vulnerability Module](modules/vulnerability/README.md)**: Vulnerability assessment guide (read-only)
 
-### Scanners Reference
-See [SCANNERS.md](SCANNERS.md) for detailed information about:
-- Scan types (Internal vs External)
-- Finding IDs and their meanings
+### Modules Reference
+See [modules/README.md](modules/README.md) for detailed information about:
+- Available modules and their capabilities
+- Finding IDs and their meanings (organized by module)
 - Severity classifications
 - Remediation guidance
 
