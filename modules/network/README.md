@@ -2,9 +2,13 @@
 
 ## Overview
 
+**⚠️ DEVELOPMENT STATUS: This module is currently in development and should be used at your own risk.**
+
 This module performs basic network exposure assessment by detecting listening services and IPv6 configuration. It identifies services bound to global interfaces (`0.0.0.0` and `[::]`) which may be exposed to the network, and checks IPv6 system configuration.
 
 **Context**: Use this module to get an initial view of network-exposed services before applying firewall rules. This is a diagnostic scan that helps identify what needs firewall protection.
+
+**⚠️ WARNING**: This module is incomplete. The `apply` functionality is not implemented. Only `scan` mode is currently functional. Use with caution.
 
 ## What This Module Does (Current Capabilities)
 
@@ -100,7 +104,9 @@ This is a **scan-only diagnostic module**. Remediation must be performed using o
 
 ## Status
 
-**State**: Stable (Basic Scope)
+**State**: ⚠️ **IN DEVELOPMENT** - Use at your own risk
+
+**⚠️ IMPORTANT**: This module is currently in development. Only scan functionality is implemented. Apply mode is not available and will not perform any actions.
 
 **Features Implemented**:
 - IPv4 global listener detection
@@ -114,5 +120,7 @@ This is a **scan-only diagnostic module**. Remediation must be performed using o
 - Service classification (critical/internal/expected)
 - External accessibility testing
 - Port forwarding/NAT detection
-- Apply/remediation functionality
+- Apply/remediation functionality (NOT IMPLEMENTED)
 - Integration with firewall module
+
+**⚠️ DISCLAIMER**: This module is provided as-is for experimental use. The scan functionality is stable, but the module is incomplete and should not be used in production environments without thorough testing.

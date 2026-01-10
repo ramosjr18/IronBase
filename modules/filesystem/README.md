@@ -2,9 +2,13 @@
 
 ## Overview
 
+**⚠️ DEVELOPMENT STATUS: This module is currently in development and should be used at your own risk.**
+
 This module checks critical filesystem permission configurations on Linux systems. It verifies ownership and world-writable permissions for sensitive directories (`/etc`, `/boot`, `/root`) and files. These checks are fundamental for preventing unauthorized modifications to system configuration files.
 
 **Context**: Use this module to audit basic filesystem security posture before deploying hardening changes. This is a baseline check that should run early in any security assessment.
+
+**⚠️ WARNING**: This module is incomplete. The `apply` functionality is not implemented. Only `scan` mode is currently functional. Use with caution.
 
 ## What This Module Does (Current Capabilities)
 
@@ -85,7 +89,9 @@ All remediation must be performed manually:
 
 ## Status
 
-**State**: Stable (Limited Scope)
+**State**: ⚠️ **IN DEVELOPMENT** - Use at your own risk
+
+**⚠️ IMPORTANT**: This module is currently in development. Only scan functionality is implemented. Apply mode is not available and will not perform any actions.
 
 **Features Implemented**:
 - `/etc` ownership verification
@@ -96,5 +102,7 @@ All remediation must be performed manually:
 - SUID binary scanning (mentioned in metadata, not implemented)
 - Recursive permission checking
 - Full permission mode analysis
-- Apply/remediation functionality
+- Apply/remediation functionality (NOT IMPLEMENTED)
 - Additional sensitive directory checks
+
+**⚠️ DISCLAIMER**: This module is provided as-is for experimental use. The scan functionality is stable, but the module is incomplete and should not be used in production environments without thorough testing.

@@ -2,9 +2,13 @@
 
 ## Overview
 
+**⚠️ DEVELOPMENT STATUS: This module is currently in development and should be used at your own risk.**
+
 This module performs basic service detection and logging configuration checks. It identifies Docker installation and socket permissions, verifies auditd service status, and checks journald persistence configuration. These checks help ensure proper system accounting and service isolation.
 
 **Context**: Use this module to audit service presence and logging configuration before applying hardening changes. This is a diagnostic scan that complements other security modules.
+
+**⚠️ WARNING**: This module is incomplete. The `apply` functionality is not implemented. Only `scan` mode is currently functional. Use with caution.
 
 ## What This Module Does (Current Capabilities)
 
@@ -99,7 +103,9 @@ This is a **scan-only diagnostic module**. Remediation must be performed manuall
 
 ## Status
 
-**State**: Stable (Basic Scope)
+**State**: ⚠️ **IN DEVELOPMENT** - Use at your own risk
+
+**⚠️ IMPORTANT**: This module is currently in development. Only scan functionality is implemented. Apply mode is not available and will not perform any actions.
 
 **Features Implemented**:
 - Docker installation detection
@@ -115,5 +121,7 @@ This is a **scan-only diagnostic module**. Remediation must be performed manuall
 - Additional service scanning (SSH, web servers, databases)
 - Service hardening verification
 - Container runtime alternatives (podman, containerd)
-- Apply/remediation functionality
+- Apply/remediation functionality (NOT IMPLEMENTED)
 - Integration with firewall module for Docker bypass detection
+
+**⚠️ DISCLAIMER**: This module is provided as-is for experimental use. The scan functionality is stable, but the module is incomplete and should not be used in production environments without thorough testing.

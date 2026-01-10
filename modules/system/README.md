@@ -2,9 +2,13 @@
 
 ## Overview
 
+**⚠️ DEVELOPMENT STATUS: This module is currently in development and should be used at your own risk.**
+
 This module checks system-level configuration for updates, time synchronization, and OS version information. It verifies pending updates, automatic update configuration, time sync status, and collects basic system metadata (OS version, kernel version). These checks ensure the system is current and properly configured for security maintenance.
 
 **Context**: Use this module to audit system maintenance configuration before applying other hardening changes. This should run early in any security assessment to verify system currency.
+
+**⚠️ WARNING**: This module is incomplete. The `apply` functionality is a placeholder and will NOT perform any actions. Only `scan` mode is currently functional. Use with caution.
 
 ## What This Module Does (Current Capabilities)
 
@@ -67,7 +71,7 @@ When executing `ironbase scan --module system`:
 
 ## Apply Behavior
 
-**Partial Implementation**: `module_apply()` exists but is **not functional**. It currently only prints a message and has a commented-out update command:
+**⚠️ NOT IMPLEMENTED**: `module_apply()` exists but is **completely non-functional**. It currently only prints a message and has a commented-out update command:
 
 ```bash
 module_apply() {
@@ -78,16 +82,16 @@ module_apply() {
 
 **Current State**: The apply function is a **placeholder**. It does not execute updates or modify system configuration.
 
+**⚠️ DO NOT USE APPLY MODE**: The apply function will not perform any actions. All remediation must be performed manually:
+- Install updates: `sudo apt-get update && sudo apt-get upgrade`
+- Configure auto-updates: `sudo apt-get install unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades`
+- Fix time sync: `sudo systemctl enable systemd-timesyncd && sudo systemctl start systemd-timesyncd`
+
 **Future Implementation** (not currently implemented):
 - Update package lists
 - Apply security updates
 - Configure automatic updates
 - Set up time synchronization
-
-**Do NOT use apply mode**: The apply function will not perform any actions. All remediation must be performed manually:
-- Install updates: `sudo apt-get update && sudo apt-get upgrade`
-- Configure auto-updates: `sudo apt-get install unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades`
-- Fix time sync: `sudo systemctl enable systemd-timesyncd && sudo systemctl start systemd-timesyncd`
 
 ## Safety Notes
 
@@ -136,7 +140,9 @@ module_apply() {
 
 ## Status
 
-**State**: Partial (Scan Complete, Apply Non-Functional)
+**State**: ⚠️ **IN DEVELOPMENT** - Use at your own risk
+
+**⚠️ IMPORTANT**: This module is currently in development. Scan functionality is complete and stable, but `apply` mode is a placeholder and will NOT perform any actions. Use with caution.
 
 **Features Implemented**:
 - OS and kernel version detection
@@ -145,10 +151,12 @@ module_apply() {
 - Automatic updates configuration check (Ubuntu/Debian)
 
 **Features Pending**:
-- Functional apply/remediation (currently placeholder)
+- Functional apply/remediation (NOT IMPLEMENTED - placeholder only)
 - EOL/EOS status verification
 - Kernel-specific vulnerability matching
 - Update source integrity verification
 - NTP configuration verification
 - Update frequency scheduling
 - Cross-distribution support (currently Ubuntu/Debian only)
+
+**⚠️ DISCLAIMER**: This module is provided as-is for experimental use. The scan functionality is stable and functional, but apply mode is completely non-functional. Do not rely on this module's apply functionality. Use in production environments at your own risk.

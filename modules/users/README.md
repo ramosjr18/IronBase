@@ -2,9 +2,13 @@
 
 ## Overview
 
+**⚠️ DEVELOPMENT STATUS: This module is currently in development and should be used at your own risk.**
+
 This module audits user accounts, privileges, and authentication configuration. It checks for multiple UID 0 accounts, empty passwords, sudoer configurations, and root account lock status. These checks help identify privilege escalation risks and authentication weaknesses.
 
 **Context**: Use this module to audit user account security before applying hardening changes. This is a critical baseline check that should run early in any security assessment.
+
+**⚠️ WARNING**: This module is incomplete. The `apply` functionality is not implemented. Only `scan` mode and `--list` mode are currently functional. Use with caution.
 
 ## What This Module Does (Current Capabilities)
 
@@ -72,9 +76,9 @@ When executing `ironbase scan --module users --list`:
 
 ## Apply Behavior
 
-**Not Applicable**: This module does not implement `module_apply()`. The function exists but is a no-op (`:`).
+**⚠️ NOT IMPLEMENTED**: This module does not implement `module_apply()`. The function exists but is a no-op (`:`) and will not perform any actions.
 
-This is a **scan-only diagnostic module**. Remediation must be performed manually or using other modules:
+**⚠️ DO NOT USE APPLY MODE**: This is a **scan-only diagnostic module**. Remediation must be performed manually or using other modules:
 - Remove UID 0 users: `sudo usermod -u <new_uid> <username>` or delete account
 - Set passwords: `sudo passwd <username>`
 - Lock accounts: `sudo passwd -l <username>`
@@ -135,7 +139,9 @@ sudo ./cmd/ironbase scan --module users --list
 
 ## Status
 
-**State**: Stable (Scan Complete, List Mode Available)
+**State**: ⚠️ **IN DEVELOPMENT** - Use at your own risk
+
+**⚠️ IMPORTANT**: This module is currently in development. Scan functionality and `--list` mode are complete and stable, but `apply` mode is not implemented and will not perform any actions.
 
 **Features Implemented**:
 - UID 0 duplicate detection
@@ -152,5 +158,7 @@ sudo ./cmd/ironbase scan --module users --list
 - Inactive account detection
 - Home directory permission checks
 - Default account detection
-- Apply/remediation functionality (user creation, account locking)
+- Apply/remediation functionality (NOT IMPLEMENTED - no-op only)
 - Integration with SSH module for coordinated hardening
+
+**⚠️ DISCLAIMER**: This module is provided as-is for experimental use. The scan and list functionality are stable and functional, but apply mode is completely non-functional. Use in production environments at your own risk.
