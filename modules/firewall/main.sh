@@ -79,7 +79,9 @@ module_scan() {
     local numbered_out
     numbered_out=$(sudo ufw status numbered 2>/dev/null)
     if [[ -n "$numbered_out" ]]; then
-        local allow_count=$(echo "$numbered_out" | grep -c "ALLOW IN" || echo "0")
+        local allow_count=$(echo "$numbered_out" | grep -c "ALLOW IN" 2>/dev/null | head -n1 | tr -d '[:space:]' || echo "0")
+        # Sanitize: ensure numeric value
+        [[ "$allow_count" =~ ^[0-9]+$ ]] || allow_count=0
         
         # Check for SSH port dynamically
         local ssh_port="22"
@@ -205,7 +207,9 @@ module_scan() {
     
     # Check nftables
     if command_exists nft && sudo nft list ruleset 2>/dev/null | grep -q "table"; then
-        local nft_table_count=$(sudo nft list tables 2>/dev/null | wc -l)
+        local nft_table_count=$(sudo nft list tables 2>/dev/null | wc -l | head -n1 | tr -d '[:space:]' || echo "0")
+        # Sanitize: ensure numeric value
+        [[ "$nft_table_count" =~ ^[0-9]+$ ]] || nft_table_count=0
         if [[ $nft_table_count -gt 0 ]]; then
             ((firewall_count++))
             active_firewalls="${active_firewalls}nftables "
@@ -327,7 +331,9 @@ module_scan() {
 
     # 9. Logging & Rate Limiting
     local ufw_logging=$(echo "$status_out" | grep -i "Logging:" | awk '{print $2}' || echo "off")
-    local limit_rules=$(echo "$numbered_out" | grep -c "limit" || echo "0")
+    local limit_rules=$(echo "$numbered_out" | grep -c "limit" 2>/dev/null | head -n1 | tr -d '[:space:]' || echo "0")
+    # Sanitize: ensure numeric value
+    [[ "$limit_rules" =~ ^[0-9]+$ ]] || limit_rules=0
     
     if [[ "$ufw_logging" == "off" ]] && [[ "$limit_rules" -eq 0 ]]; then
         add_finding "FW-009" "$SEV_MEDIUM" "$STATUS_WARN" "Logging & Rate Limiting" \
@@ -400,19 +406,23 @@ module_scan() {
 
     # 11. Configuration Drift
     if command_exists ss; then
-        local listening_ports=$(ss -lnt 2>/dev/null | awk 'NR>1 && ($5 ~ /^0\.0\.0\.0/ || $5 ~ /^\[::\]/) {print $5}' | awk -F: '{print $NF}' | sed 's/]//' | sort -u)
-        local ufw_allowed_ports=$(echo "$numbered_out" | grep "ALLOW" | grep -oE "[0-9]+(/tcp|/udp)?" | grep -oE "[0-9]+" | sort -u)
+        # Parse listening ports: only capture numeric ports from public interfaces
+        local listening_ports=$(ss -lnt 2>/dev/null | awk 'NR>1 && ($5 ~ /^0\.0\.0\.0/ || $5 ~ /^\[::\]/) {print $5}' | awk -F: '{print $NF}' | sed 's/]//' | grep -E '^[0-9]+$' | sort -u)
+        # Parse UFW allowed ports: only capture numeric ports
+        local ufw_allowed_ports=$(echo "$numbered_out" | grep "ALLOW" | grep -oE "[0-9]+(/tcp|/udp)?" | grep -oE "^[0-9]+$" | sort -u)
         
         if [[ -n "$listening_ports" ]]; then
             local unaccounted_ports=""
             local accounted_count=0
             
             for port in $listening_ports; do
-                if [[ -z "$port" ]]; then continue; fi
+                # Sanitize: only process numeric ports
+                if [[ -z "$port" ]] || ! [[ "$port" =~ ^[0-9]+$ ]]; then continue; fi
                 
                 local found=0
                 for ufw_port in $ufw_allowed_ports; do
-                    if [[ "$port" == "$ufw_port" ]]; then
+                    # Sanitize: only compare numeric ports
+                    if [[ -n "$ufw_port" ]] && [[ "$ufw_port" =~ ^[0-9]+$ ]] && [[ "$port" == "$ufw_port" ]]; then
                         found=1
                         ((accounted_count++))
                         break
