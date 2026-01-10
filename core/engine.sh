@@ -74,6 +74,7 @@ engine_main() {
             --module) target_module="$2"; shift ;;
             --profile) profile_path="$2"; shift ;;
             --force) export IRONBASE_FORCE="true" ;;
+            --bootstrap) export IRONBASE_BOOTSTRAP="true" ;;
             --list) export IRONBASE_LIST_MODE="true" ;;
             *) ;;
         esac

@@ -479,7 +479,13 @@ module_apply() {
         echo "IronBase - Firewall Remediation Log" > "$APPLY_LOG"
         echo "Date: $(date)" >> "$APPLY_LOG"
         echo "Hostname: $(hostname)" >> "$APPLY_LOG"
-        echo "Mode: ${IRONBASE_FORCE:+FORCE}${IRONBASE_FORCE:-SAFE}" >> "$APPLY_LOG"
+        local mode="SAFE"
+        if [[ "$IRONBASE_BOOTSTRAP" == "true" ]]; then
+            mode="BOOTSTRAP"
+        elif [[ "$IRONBASE_FORCE" == "true" ]]; then
+            mode="FORCE"
+        fi
+        echo "Mode: $mode" >> "$APPLY_LOG"
         echo "-------------------------------------" >> "$APPLY_LOG"
     }
     
@@ -558,6 +564,261 @@ module_apply() {
     }
     
     local ssh_port=$(detect_ssh_port)
+    
+    # ========================================================================
+    # BOOTSTRAP MODE HANDLING (Initial Firewall Hardening)
+    # ========================================================================
+    if [[ "$IRONBASE_BOOTSTRAP" == "true" ]]; then
+        echo -e "\n${C_RED}${C_BOLD}==============================================================${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}          BOOTSTRAP MODE: INITIAL FIREWALL SETUP                ${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}==============================================================${C_RESET}"
+        echo -e "${C_YELLOW}WARNING: Bootstrap mode will configure UFW firewall from scratch.${C_RESET}"
+        echo ""
+        echo -e "${C_BOLD}This will:${C_RESET}"
+        echo -e "  ${C_YELLOW}•${C_RESET} Install UFW if missing"
+        echo -e "  ${C_YELLOW}•${C_RESET} Add SSH allow rule ($ssh_port/tcp) ${C_BOLD}BEFORE${C_RESET} enabling firewall"
+        echo -e "  ${C_YELLOW}•${C_RESET} Enable UFW firewall"
+        echo -e "  ${C_YELLOW}•${C_RESET} Set default policies: ${C_RED}DENY incoming${C_RESET}, ALLOW outgoing"
+        echo -e "  ${C_YELLOW}•${C_RESET} Handle IPv6 configuration"
+        echo -e "  ${C_YELLOW}•${C_RESET} Detect and warn about Docker/VPN/bridge conflicts"
+        echo -e "  ${C_YELLOW}•${C_RESET} Disable IP forwarding (if safe to do so)"
+        echo ""
+        echo -e "${C_RED}${C_BOLD}NETWORKING BEHAVIOR WILL CHANGE${C_RESET}"
+        echo -e "${C_RED}  • Incoming connections will be blocked by default${C_RESET}"
+        echo -e "${C_RED}  • Only explicitly allowed services will be accessible${C_RESET}"
+        echo -e "${C_RED}  • Ensure SSH access is properly configured before proceeding${C_RESET}"
+        echo ""
+        echo -e "${C_YELLOW}This action requires explicit confirmation.${C_RESET}"
+        echo ""
+        
+        read -p "Type 'BOOTSTRAP' (all caps) to continue: " bootstrap_confirm < /dev/tty
+        if [[ "$bootstrap_confirm" != "BOOTSTRAP" ]]; then
+            echo "Aborting Bootstrap Mode."
+            log_apply "ABORT" "User aborted Bootstrap Mode at warning screen."
+            return 1
+        fi
+        
+        log_apply "BOOTSTRAP_START" "User confirmed Bootstrap Mode execution."
+        echo -e "${C_BOLD}>>> Starting Bootstrap Mode Firewall Setup <<<${C_RESET}"
+        
+        # Helper function: Detect Docker
+        detect_docker() {
+            local docker_detected=0
+            
+            # Check Docker service
+            if command_exists systemctl && systemctl is-active --quiet docker 2>/dev/null; then
+                docker_detected=1
+            elif command_exists docker && docker info &>/dev/null 2>&1; then
+                docker_detected=1
+            fi
+            
+            # Check Docker networks/bridges
+            if command_exists ip && ip link show | grep -qi "docker"; then
+                docker_detected=1
+            fi
+            
+            echo "$docker_detected"
+        }
+        
+        # Helper function: Detect VPN/Bridge interfaces
+        detect_vpn_or_bridge() {
+            local vpn_bridge_detected=0
+            
+            if command_exists ip; then
+                # Check for common VPN interfaces
+                if ip link show | grep -qiE "(tun[0-9]+|tap[0-9]+|ppp[0-9]+|wg[0-9]+|openvpn|wireguard)"; then
+                    vpn_bridge_detected=1
+                fi
+                
+                # Check for bridge interfaces
+                if ip link show type bridge 2>/dev/null | grep -q "state UP"; then
+                    vpn_bridge_detected=1
+                fi
+            fi
+            
+            echo "$vpn_bridge_detected"
+        }
+        
+        # Step 1: Install UFW if missing
+        if ! command_exists ufw; then
+            log_apply "INFO" "UFW not installed. Installing UFW..."
+            echo -e "${C_YELLOW}Installing UFW package...${C_RESET}"
+            
+            if command_exists apt-get; then
+                sudo apt-get update -qq 2>&1 | tee -a "$APPLY_LOG"
+                sudo apt-get install -y ufw 2>&1 | tee -a "$APPLY_LOG"
+            elif command_exists yum; then
+                sudo yum install -y ufw 2>&1 | tee -a "$APPLY_LOG"
+            elif command_exists dnf; then
+                sudo dnf install -y ufw 2>&1 | tee -a "$APPLY_LOG"
+            else
+                log_apply "ERROR" "Package manager not found. Cannot install UFW automatically."
+                echo -e "${C_RED}Error: Cannot install UFW. Please install manually.${C_RESET}"
+                return 1
+            fi
+            
+            if command_exists ufw; then
+                log_apply "SUCCESS" "UFW installed successfully"
+            else
+                log_apply "ERROR" "UFW installation failed"
+                echo -e "${C_RED}Error: UFW installation failed.${C_RESET}"
+                return 1
+            fi
+        else
+            log_apply "INFO" "UFW is already installed"
+        fi
+        
+        # Step 2: Add SSH allow rule BEFORE enabling firewall (CRITICAL)
+        # This ensures SSH access is preserved when firewall is enabled
+        log_apply "INFO" "Adding SSH allow rule BEFORE enabling firewall..."
+        echo -e "${C_BOLD}Adding SSH allow rule ($ssh_port/tcp) to prevent lockout...${C_RESET}"
+        
+        # Reset UFW to default state if active (allows adding rules before enable)
+        if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+            log_apply "WARN" "UFW is already active. SSH rule may already exist."
+        else
+            # UFW is inactive, we can add rules before enabling
+            sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase Bootstrap)' 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH) before enabling firewall"
+            echo -e "${C_GREEN}SSH rule added successfully.${C_RESET}"
+        fi
+        
+        # Step 3: Set default policies BEFORE enabling
+        log_apply "INFO" "Setting default policies..."
+        sudo ufw default deny incoming 2>&1 | tee -a "$APPLY_LOG"
+        sudo ufw default allow outgoing 2>&1 | tee -a "$APPLY_LOG"
+        log_apply "SUCCESS" "Default policies set: deny incoming, allow outgoing"
+        
+        # Step 4: Enable UFW
+        log_apply "INFO" "Enabling UFW firewall..."
+        echo -e "${C_YELLOW}Enabling UFW firewall...${C_RESET}"
+        
+        # Check if UFW is already active
+        if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+            log_apply "INFO" "UFW is already active"
+            echo -e "${C_GREEN}UFW is already active.${C_RESET}"
+        else
+            # Enable UFW (may prompt for confirmation, use --force to avoid)
+            if echo "y" | sudo ufw --force enable 2>&1 | tee -a "$APPLY_LOG"; then
+                log_apply "SUCCESS" "UFW enabled successfully"
+                echo -e "${C_GREEN}UFW firewall enabled.${C_RESET}"
+            else
+                log_apply "ERROR" "Failed to enable UFW"
+                echo -e "${C_RED}Error: Failed to enable UFW.${C_RESET}"
+                return 1
+            fi
+        fi
+        
+        # Step 5: Verify SSH rule exists
+        local numbered_out=$(sudo ufw status numbered 2>/dev/null)
+        local ssh_allowed=$(echo "$numbered_out" | grep -E "ALLOW.*$ssh_port.*tcp" || echo "")
+        if [[ -z "$ssh_allowed" ]]; then
+            log_apply "WARN" "SSH rule not found in active rules. Adding now..."
+            sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase Bootstrap)' 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH)"
+        else
+            log_apply "SUCCESS" "SSH rule confirmed: allow $ssh_port/tcp"
+            echo -e "${C_GREEN}SSH access confirmed: port $ssh_port/tcp is allowed.${C_RESET}"
+        fi
+        
+        # Step 6: Handle IPv6 (same logic as FORCE mode)
+        local ufw_ipv6_enabled=$(grep "^IPV6" /etc/default/ufw 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+        if [[ "$ufw_ipv6_enabled" != "no" ]]; then
+            backup_file /etc/default/ufw
+            log_apply "INFO" "Disabling IPv6 in UFW (Bootstrap mode)..."
+            sudo sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "IPv6 disabled in UFW (IPV6=no)"
+            echo -e "${C_YELLOW}IPv6 disabled in UFW. Reload required.${C_RESET}"
+        else
+            log_apply "INFO" "IPv6 already disabled in UFW"
+        fi
+        
+        # Step 7: Detect and warn about Docker
+        local docker_detected=$(detect_docker)
+        if [[ "$docker_detected" == "1" ]]; then
+            echo ""
+            echo -e "${C_YELLOW}${C_BOLD}>>> Docker Detected <<<${C_RESET}"
+            echo -e "${C_YELLOW}WARNING: Docker is active. Docker may bypass UFW firewall rules.${C_RESET}"
+            echo -e "${C_YELLOW}Docker uses its own iptables chains which can override UFW rules.${C_RESET}"
+            echo -e "${C_YELLOW}Verify Docker container networking independently.${C_RESET}"
+            log_apply "WARN" "Docker detected - may bypass UFW rules. Not modifying Docker configuration."
+        else
+            log_apply "INFO" "Docker not detected"
+        fi
+        
+        # Step 8: Detect and handle forwarding
+        local ipv4_forward=$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || echo "0")
+        local ipv6_forward="0"
+        if [[ -f /proc/sys/net/ipv6/conf/all/forwarding ]]; then
+            ipv6_forward=$(cat /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || echo "0")
+        fi
+        
+        local forwarding_enabled=0
+        if [[ "$ipv4_forward" == "1" ]] || [[ "$ipv6_forward" == "1" ]]; then
+            forwarding_enabled=1
+        fi
+        
+        if [[ "$forwarding_enabled" == "1" ]]; then
+            echo ""
+            echo -e "${C_YELLOW}${C_BOLD}>>> IP Forwarding Detected <<<${C_RESET}"
+            echo -e "Current state: IPv4 forwarding=$ipv4_forward, IPv6 forwarding=$ipv6_forward"
+            
+            # Check for Docker/VPN/Bridge
+            local docker_detected=$(detect_docker)
+            local vpn_bridge_detected=$(detect_vpn_or_bridge)
+            
+            if [[ "$docker_detected" == "1" ]] || [[ "$vpn_bridge_detected" == "1" ]]; then
+                echo -e "${C_YELLOW}WARNING: Docker, VPN, or bridge interfaces detected.${C_RESET}"
+                echo -e "${C_YELLOW}Skipping forwarding disable to avoid breaking Docker/VPN networking.${C_RESET}"
+                log_apply "SKIP" "IP forwarding enabled but Docker/VPN/bridge detected - not disabling forwarding"
+            else
+                echo -e "${C_YELLOW}No Docker/VPN/bridge detected. Disabling IP forwarding...${C_RESET}"
+                
+                if confirm_action "Disable IP forwarding? (safe for non-router systems)" "Y"; then
+                    if [[ "$ipv4_forward" == "1" ]]; then
+                        sudo sysctl -w net.ipv4.ip_forward=0 2>&1 | tee -a "$APPLY_LOG"
+                        echo "net.ipv4.ip_forward=0" | sudo tee -a /etc/sysctl.conf 2>&1 | tee -a "$APPLY_LOG"
+                        log_apply "SUCCESS" "IPv4 forwarding disabled"
+                    fi
+                    
+                    if [[ "$ipv6_forward" == "1" ]]; then
+                        sudo sysctl -w net.ipv6.conf.all.forwarding=0 2>&1 | tee -a "$APPLY_LOG"
+                        echo "net.ipv6.conf.all.forwarding=0" | sudo tee -a /etc/sysctl.conf 2>&1 | tee -a "$APPLY_LOG"
+                        log_apply "SUCCESS" "IPv6 forwarding disabled"
+                    fi
+                    
+                    echo -e "${C_GREEN}IP forwarding disabled.${C_RESET}"
+                else
+                    log_apply "SKIP" "IP forwarding kept enabled (user choice)"
+                fi
+            fi
+        else
+            log_apply "INFO" "IP forwarding already disabled"
+        fi
+        
+        # Step 9: Enable logging
+        if sudo ufw status verbose 2>/dev/null | grep -qi "Logging: off"; then
+            sudo ufw logging on 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "UFW logging enabled"
+        fi
+        
+        # Step 10: Reload UFW if IPv6 was changed
+        if [[ "$ufw_ipv6_enabled" != "no" ]]; then
+            sudo ufw reload 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "UFW reloaded (IPv6 config change)"
+        fi
+        
+        echo ""
+        echo -e "${C_BOLD}=== Bootstrap Mode Complete ===${C_RESET}"
+        echo -e "${C_GREEN}Firewall has been initialized and enabled.${C_RESET}"
+        echo ""
+        echo "Final UFW Status:"
+        sudo ufw status verbose
+        echo ""
+        echo -e "Log saved to: ${C_BLUE}$APPLY_LOG${C_RESET}"
+        
+        return 0
+    fi
     
     # ========================================================================
     # FORCE MODE HANDLING
