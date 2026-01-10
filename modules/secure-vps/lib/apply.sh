@@ -3,7 +3,12 @@
 # modules/secure-vps/lib/apply.sh
 # Handles interactive remediation
 
-APPLY_LOG="${VPS_APPLY_LOG:-secure-vps-apply.log}"
+# Use run directory if available, otherwise fallback to current directory
+if [[ -n "$IRONBASE_RUN_DIR" ]]; then
+    APPLY_LOG="${VPS_APPLY_LOG:-$IRONBASE_RUN_DIR/secure-vps-apply.log}"
+else
+    APPLY_LOG="${VPS_APPLY_LOG:-secure-vps-apply.log}"
+fi
 
 # --- Utility Functions ---
 

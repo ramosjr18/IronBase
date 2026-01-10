@@ -22,7 +22,9 @@ dist/
 build/
 
 # Project specific
-# (None yet, shell scripts are source)
 estado_actual.md
 *.txt
 vulnerability-module.md
+
+# Reporting output (all execution artifacts)
+/output/**

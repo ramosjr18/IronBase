@@ -4,7 +4,12 @@
 # Handles Output Formatting and Logging
 
 # Output File
-LOG_FILE="${VPS_LOG_FILE:-secure-vps-scan.txt}"
+# Use run directory if available, otherwise fallback to current directory
+if [[ -n "$IRONBASE_RUN_DIR" ]]; then
+    LOG_FILE="${VPS_LOG_FILE:-$IRONBASE_RUN_DIR/secure-vps.log}"
+else
+    LOG_FILE="${VPS_LOG_FILE:-secure-vps-scan.txt}"
+fi
 
 # Counters
 COUNT_CRITICAL=0
@@ -76,6 +81,11 @@ print_finding() {
     fi
     echo ""
 
+    # Register to global report if reporting system is initialized
+    if [[ -n "$IRONBASE_RUN_DIR" ]] && declare -f register_finding > /dev/null 2>&1; then
+        register_finding "$id" "$severity" "" "$title" "$description" "$evidence" "$recommendation" "$type" "$origin" "$category"
+    fi
+
     # --- Log File Output ---
     {
         echo "[$severity] $title ($id)"
@@ -108,38 +118,43 @@ print_summary() {
         echo "================================="
     } >> "$LOG_FILE"
 
-    # Console Summary & Status
-    echo "======================================"
-    echo -e "${C_BOLD}Scan Summary:${C_RESET}"
-    echo -e "${C_RED}Critical: $COUNT_CRITICAL${C_RESET}"
-    echo -e "${C_RED}High:     $COUNT_HIGH${C_RESET}"
-    echo -e "${C_YELLOW}Medium:   $COUNT_MEDIUM${C_RESET}"
-    echo -e "${C_BLUE}Low:      $COUNT_LOW${C_RESET}"
-    echo -e "Info:     $COUNT_INFO"
-    echo "======================================"
+    # Console Summary & Status (only if not in engine mode)
+    # In engine mode, global summary will be shown at the end from summary.txt
+    if [[ -z "$IRONBASE_RUN_DIR" ]]; then
+        echo "======================================"
+        echo -e "${C_BOLD}Scan Summary:${C_RESET}"
+        echo -e "${C_RED}Critical: $COUNT_CRITICAL${C_RESET}"
+        echo -e "${C_RED}High:     $COUNT_HIGH${C_RESET}"
+        echo -e "${C_YELLOW}Medium:   $COUNT_MEDIUM${C_RESET}"
+        echo -e "${C_BLUE}Low:      $COUNT_LOW${C_RESET}"
+        echo -e "Info:     $COUNT_INFO"
+        echo "======================================"
+    fi
 
-    # Determine Result
+    # Determine Result (silent in engine mode)
     local exit_code=0
     if (( COUNT_CRITICAL > 0 )) || (( COUNT_HIGH > 0 )); then
-        echo -e "${C_RED}Result: FAILED (Critical/High findings detected)${C_RESET}"
+        [[ -z "$IRONBASE_RUN_DIR" ]] && echo -e "${C_RED}Result: FAILED (Critical/High findings detected)${C_RESET}"
         exit_code=1
     elif (( COUNT_MEDIUM > 0 )); then
-        echo -e "${C_YELLOW}Result: PASSED WITH FINDINGS (Medium findings detected)${C_RESET}"
+        [[ -z "$IRONBASE_RUN_DIR" ]] && echo -e "${C_YELLOW}Result: PASSED WITH FINDINGS (Medium findings detected)${C_RESET}"
         exit_code=0
     else
-        echo -e "${C_GREEN}Result: PASSED${C_RESET}"
+        [[ -z "$IRONBASE_RUN_DIR" ]] && echo -e "${C_GREEN}Result: PASSED${C_RESET}"
         exit_code=0
     fi
 
-    # Next Steps
-    echo ""
-    echo -e "${C_BOLD}Next Steps:${C_RESET}"
-    echo "1. Review the full report below."
-    echo "2. Apply remediations if safe:"
-    echo "   ./cmd/ironbase apply --module secure-vps"
-    echo -e "   ${C_YELLOW}WARNING: Review baseline/allowlist before applying fixes in production.${C_RESET}"
-    echo ""
-    echo "Report saved: $(pwd)/$LOG_FILE"
+    # Next Steps (only if not in engine mode)
+    if [[ -z "$IRONBASE_RUN_DIR" ]]; then
+        echo ""
+        echo -e "${C_BOLD}Next Steps:${C_RESET}"
+        echo "1. Review the full report below."
+        echo "2. Apply remediations if safe:"
+        echo "   ./cmd/ironbase apply --module secure-vps"
+        echo -e "   ${C_YELLOW}WARNING: Review baseline/allowlist before applying fixes in production.${C_RESET}"
+        echo ""
+        echo "Report saved: $(pwd)/$LOG_FILE"
+    fi
     
     # Add Next Steps to Log
     {

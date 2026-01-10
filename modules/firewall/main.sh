@@ -473,7 +473,12 @@ module_apply() {
     fi
     
     # Initialize helpers (fallback definitions if not available)
-    local APPLY_LOG="${VPS_APPLY_LOG:-firewall-apply.log}"
+    # Use run directory if available, otherwise fallback to current directory
+    if [[ -n "$IRONBASE_RUN_DIR" ]]; then
+        local APPLY_LOG="${VPS_APPLY_LOG:-$IRONBASE_RUN_DIR/firewall-apply.log}"
+    else
+        local APPLY_LOG="${VPS_APPLY_LOG:-firewall-apply.log}"
+    fi
     
     init_apply_log() {
         echo "IronBase - Firewall Remediation Log" > "$APPLY_LOG"

@@ -6,6 +6,7 @@
 # Load utilities
 source "$(dirname "$0")/../core/utils.sh"
 source "$(dirname "$0")/../core/findings.sh"
+source "$(dirname "$0")/../core/reporting.sh"
 
 IRONBASE_ROOT="$(dirname "$0")/.."
 MODULES_DIR="$IRONBASE_ROOT/modules"
@@ -36,6 +37,16 @@ run_module() {
     # Get Metadata
     local mod_name
     mod_name=$(module_meta | grep "Name:" | cut -d: -f2 | xargs)
+    
+    # Register module in global report
+    register_module "$module_name"
+    
+    # Set module-specific log paths in run directory
+    export VPS_LOG_FILE="$IRONBASE_RUN_DIR/secure-vps.log"
+    export VULN_LOG_FILE="$IRONBASE_RUN_DIR/vulnerability.log"
+    export VPS_APPLY_LOG="$IRONBASE_RUN_DIR/secure-vps-apply.log"
+    # SSH module uses VPS_LOG_FILE (shared from secure-vps pattern)
+    # Firewall module uses VPS_APPLY_LOG pattern
     
     log_info "Running module: $mod_name ($module_name)"
     
@@ -84,6 +95,15 @@ engine_main() {
     log_info "IronBase Engine v0.1.0 starting..."
     log_info "Action: $action"
     log_info "Profile: $profile_path"
+    
+    # Initialize reporting system
+    local flags_str=""
+    [[ "$IRONBASE_FORCE" == "true" ]] && flags_str="${flags_str} --force"
+    [[ "$IRONBASE_BOOTSTRAP" == "true" ]] && flags_str="${flags_str} --bootstrap"
+    [[ "$IRONBASE_LIST_MODE" == "true" ]] && flags_str="${flags_str} --list"
+    
+    local run_dir=$(init_reporting "$action" "$profile_path" "$flags_str")
+    log_info "Output directory: $run_dir"
 
     # Discover modules
     local modules=()
@@ -114,5 +134,24 @@ engine_main() {
         fi
     done
     
+    # Generate final reports (returns exit code)
+    log_info "Generating reports..."
+    generate_reports
+    local exit_code=$?
+    
+    # Show summary (clean console output)
+    if [[ -f "$GLOBAL_RUN_DIR/summary.txt" ]]; then
+        echo ""
+        cat "$GLOBAL_RUN_DIR/summary.txt"
+    fi
+    
     log_info "Execution completed."
+    log_info "Reports saved to: $GLOBAL_RUN_DIR"
+    
+    # Cleanup temporary findings file
+    if [[ -n "$GLOBAL_FINDINGS_FILE" ]] && [[ -f "$GLOBAL_FINDINGS_FILE" ]]; then
+        rm -f "$GLOBAL_FINDINGS_FILE" 2>/dev/null || true
+    fi
+    
+    return $exit_code
 }

@@ -34,6 +34,11 @@ add_finding() {
     local evidence="$6"
     local remediation="$7"
 
+    # Register to global report if reporting system is initialized
+    if [[ -n "$IRONBASE_RUN_DIR" ]] && declare -f register_finding > /dev/null 2>&1; then
+        register_finding "$id" "$severity" "$status" "$title" "$description" "$evidence" "$remediation" "" "" ""
+    fi
+
     # Colorize based on status
     local color="$C_RESET"
     if [[ "$status" == "$STATUS_FAIL" ]]; then
@@ -58,7 +63,4 @@ add_finding() {
         fi
         echo "" 
     fi
-
-    # TODO: In the future, write JSON object to a file descriptor for aggregator
-    # echo "{\"id\": \"$id\", \"status\": \"$status\", ...}" >&3
 }
