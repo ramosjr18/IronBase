@@ -63,6 +63,7 @@ run_module() {
     # SSH module uses VPS_LOG_FILE (shared from secure-vps pattern) but can override with SSH_LOG_FILE
     # Firewall module uses VPS_APPLY_LOG pattern but can override with FIREWALL_APPLY_LOG
     
+    # Show module name (will appear after progress bar update)
     log_info "Running module: $mod_name ($module_name)"
     
     # Check if list mode is enabled
@@ -141,29 +142,60 @@ engine_main() {
     if [[ -n "$target_module" ]]; then
         modules=("$target_module")
     else
-        # List all directories in modules/
+        # List all directories in modules/ and filter by profile
         for d in "$MODULES_DIR"/*/; do
             if [[ -d "$d" ]]; then
-                modules+=($(basename "$d"))
+                local mod_name=$(basename "$d")
+                # Check if enabled in profile before adding
+                if is_module_enabled "$mod_name" "$profile_path"; then
+                    modules+=("$mod_name")
+                fi
             fi
         done
     fi
-
-    # Execute
+    
+    # Count total modules to execute
+    local total_modules=${#modules[@]}
+    
+    # Initialize progress bar if we have modules to execute
+    if [[ $total_modules -gt 0 ]]; then
+        init_progress_bar "$total_modules"
+    fi
+    
+    # Execute modules with progress tracking
+    local module_index=0
     for mod in "${modules[@]}"; do
-        # Check if enabled in profile
+        module_index=$((module_index + 1))
+        
+        # Get friendly module name for progress display (simplified to avoid double-loading)
+        # We'll show the module key name, run_module will show the full name in its output
+        local mod_display_name="$mod"
+        
+        # Update progress bar before running module
+        update_progress "$module_index" "$action: $mod_display_name"
+        
+        # Small delay to make progress visible in real-time
+        sleep 0.2 2>/dev/null || true
+        
+        # Execute module
+        # Note: run_module already loads the module and shows its friendly name, so we don't need to do it here
         if [[ -n "$target_module" ]]; then
              # Force run if manually specified
              run_module "$action" "$mod" "$profile_path"
         else
              if is_module_enabled "$mod" "$profile_path"; then
                  run_module "$action" "$mod" "$profile_path"
-             else
-                 # log_info "Skipping module $mod (disabled in profile)"
-                 :
              fi
         fi
+        
+        # Small delay after module execution for visibility
+        sleep 0.2 2>/dev/null || true
     done
+    
+    # Complete progress bar
+    if [[ $total_modules -gt 0 ]]; then
+        complete_progress_bar
+    fi
     
     # Generate final reports (returns exit code)
     # Only generate reports if reporting was initialized successfully
