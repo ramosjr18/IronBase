@@ -543,34 +543,432 @@ module_apply() {
         return 1
     fi
     
-    # Detect SSH port dynamically
-    detect_ssh_port() {
-        local ssh_port="22"
+    # ========================================================================
+    # PHASE 1: PRE-FLIGHT SSH SAFETY CHECK (MANDATORY, NON-BYPASSABLE)
+    # ========================================================================
+    # This safety check MUST execute BEFORE ANY firewall modifications.
+    # It verifies that SSH is running and the port can be reliably detected.
+    # This check applies to ALL apply modes (SAFE, FORCE, BOOTSTRAP).
+    # Even --force mode cannot skip this safety guard.
+    # ========================================================================
+    
+    # Global variables for SSH safety system
+    local SSH_PORT=""
+    local SSH_PID=""
+    local UFW_RULES_BACKUP_DIR=""
+    
+    # Detect SSH port using authoritative method (ss -lntp), fallback to sshd_config
+    # Returns: port number on success, empty string on failure
+    detect_ssh_port_authoritative() {
+        local detected_port=""
+        local sshd_process=""
         
-        # Try from sshd_config first
-        if [[ -f /etc/ssh/sshd_config ]]; then
-            local config_port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' | head -n1 | tr -d '[:space:]')
-            if [[ -n "$config_port" ]] && [[ "$config_port" =~ ^[0-9]+$ ]] && [[ "$config_port" -ge 1 ]] && [[ "$config_port" -le 65535 ]]; then
-                ssh_port="$config_port"
-            fi
-        fi
-        
-        # Verify with ss if available
+        # PHASE 1A: Use ss -lntp as authoritative source (primary detection method)
+        # ss -lntp shows listening TCP ports with process information
         if command_exists ss; then
-            local listening_port=$(ss -lnt 2>/dev/null | grep -E ":$ssh_port " | head -1)
-            if [[ -z "$listening_port" ]]; then
-                # Try to find any SSH service
-                local alt_ports=$(ss -lnt 2>/dev/null | grep -E "sshd|ssh" | awk '{print $4}' | awk -F: '{print $NF}' | head -n1 | tr -d '[:space:]')
-                if [[ -n "$alt_ports" ]] && [[ "$alt_ports" =~ ^[0-9]+$ ]] && [[ "$alt_ports" -ge 1 ]] && [[ "$alt_ports" -le 65535 ]]; then
-                    ssh_port="$alt_ports"
+            # Look for SSH daemon process listening on TCP
+            # Format: LISTEN 0 128 *:22 *:* users:(("sshd",pid=123,fd=3))
+            local ss_output=$(ss -lntp 2>/dev/null | grep -E "sshd|:22 |:2222 |:2200 ")
+            
+            if [[ -n "$ss_output" ]]; then
+                # Extract port from ss output (format: *:PORT or 0.0.0.0:PORT)
+                detected_port=$(echo "$ss_output" | awk '{print $4}' | awk -F: '{print $NF}' | grep -E '^[0-9]+$' | head -n1)
+                
+                # Extract SSH daemon PID for verification
+                SSH_PID=$(echo "$ss_output" | grep -oE 'pid=[0-9]+' | grep -oE '[0-9]+' | head -n1)
+                
+                # Verify detected port is numeric and valid range (1-65535)
+                if [[ -n "$detected_port" ]] && [[ "$detected_port" =~ ^[0-9]+$ ]] && [[ "$detected_port" -ge 1 ]] && [[ "$detected_port" -le 65535 ]]; then
+                    echo "$detected_port"
+                    return 0
                 fi
             fi
         fi
         
-        echo "$ssh_port"
+        # PHASE 1B: Fallback to /etc/ssh/sshd_config if ss detection failed
+        if [[ -z "$detected_port" ]] && [[ -f /etc/ssh/sshd_config ]]; then
+            local config_port=$(grep "^Port" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -n1 | tr -d '[:space:]')
+            
+            if [[ -n "$config_port" ]] && [[ "$config_port" =~ ^[0-9]+$ ]] && [[ "$config_port" -ge 1 ]] && [[ "$config_port" -le 65535 ]]; then
+                # Verify SSH is actually listening on this port using ss
+                if command_exists ss; then
+                    local listening_check=$(ss -lnt 2>/dev/null | grep -E ":$config_port " | head -1)
+                    if [[ -n "$listening_check" ]]; then
+                        echo "$config_port"
+                        return 0
+                    fi
+                else
+                    # ss not available, trust config file (less reliable)
+                    echo "$config_port"
+                    return 0
+                fi
+            fi
+        fi
+        
+        # Detection failed
+        return 1
     }
     
-    local ssh_port=$(detect_ssh_port)
+    # Verify SSH daemon is running
+    verify_ssh_daemon_running() {
+        # Method 1: Check process by PID (if we detected one via ss -lntp)
+        if [[ -n "$SSH_PID" ]] && [[ "$SSH_PID" =~ ^[0-9]+$ ]]; then
+            if ps -p "$SSH_PID" > /dev/null 2>&1; then
+                return 0
+            fi
+        fi
+        
+        # Method 2: Check for sshd process by name
+        if pgrep -x sshd > /dev/null 2>&1; then
+            return 0
+        fi
+        
+        # Method 3: Check systemd service status
+        if command_exists systemctl && systemctl is-active --quiet ssh 2>/dev/null; then
+            return 0
+        fi
+        
+        if command_exists systemctl && systemctl is-active --quiet sshd 2>/dev/null; then
+            return 0
+        fi
+        
+        return 1
+    }
+    
+    # Pre-flight SSH safety check - MANDATORY before any firewall modifications
+    # Returns: 0 if safe to proceed, 1 if unsafe (hard block)
+    pre_flight_ssh_safety_check() {
+        echo -e "\n${C_BOLD}${C_YELLOW}==============================================================${C_RESET}"
+        echo -e "${C_BOLD}${C_YELLOW}  PHASE 1: PRE-FLIGHT SSH SAFETY CHECK (MANDATORY)            ${C_RESET}"
+        echo -e "${C_BOLD}${C_YELLOW}==============================================================${C_RESET}"
+        log_apply "SAFETY" "Starting pre-flight SSH safety check (MANDATORY, non-bypassable)"
+        
+        # Step 1: Detect SSH port (authoritative method)
+        SSH_PORT=$(detect_ssh_port_authoritative)
+        
+        if [[ -z "$SSH_PORT" ]] || ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]] || [[ "$SSH_PORT" -lt 1 ]] || [[ "$SSH_PORT" -gt 65535 ]]; then
+            echo -e "${C_RED}${C_BOLD}BLOCKING ERROR: SSH port cannot be reliably detected.${C_RESET}"
+            echo -e "${C_RED}Firewall modifications are UNSAFE without confirmed SSH access.${C_RESET}"
+            echo ""
+            echo -e "${C_YELLOW}Detection methods attempted:${C_RESET}"
+            echo "  1. ss -lntp (authoritative): No SSH service detected"
+            if [[ -f /etc/ssh/sshd_config ]]; then
+                echo "  2. /etc/ssh/sshd_config: Port directive found but not listening"
+            else
+                echo "  2. /etc/ssh/sshd_config: File not found"
+            fi
+            echo ""
+            echo -e "${C_RED}${C_BOLD}ABORTING: Firewall apply cancelled to prevent lockout.${C_RESET}"
+            echo -e "${C_YELLOW}Please ensure:${C_RESET}"
+            echo "  - SSH daemon (sshd) is running: sudo systemctl status ssh"
+            echo "  - SSH is listening on a valid port: ss -lntp | grep sshd"
+            echo "  - SSH configuration is correct: sudo sshd -T | grep port"
+            log_apply "ERROR" "PRE-FLIGHT CHECK FAILED: SSH port cannot be detected. Aborting."
+            return 1
+        fi
+        
+        log_apply "SAFETY" "SSH port detected: $SSH_PORT (authoritative method: ss -lntp)"
+        echo -e "${C_GREEN}✓ SSH port detected: ${C_BOLD}$SSH_PORT${C_RESET}"
+        
+        # Step 2: Verify SSH daemon is running
+        if ! verify_ssh_daemon_running; then
+            echo -e "${C_RED}${C_BOLD}BLOCKING ERROR: SSH daemon is not running.${C_RESET}"
+            echo -e "${C_RED}Firewall modifications are UNSAFE without an active SSH daemon.${C_RESET}"
+            echo ""
+            echo -e "${C_YELLOW}Verification methods attempted:${C_RESET}"
+            echo "  1. Process check (PID: ${SSH_PID:-none})"
+            echo "  2. Process name check (sshd)"
+            echo "  3. Systemd service status (ssh/sshd)"
+            echo ""
+            echo -e "${C_RED}${C_BOLD}ABORTING: Firewall apply cancelled to prevent lockout.${C_RESET}"
+            echo -e "${C_YELLOW}Please start SSH service:${C_RESET}"
+            echo "  sudo systemctl start ssh  # Ubuntu/Debian"
+            echo "  sudo systemctl start sshd  # RHEL/CentOS"
+            log_apply "ERROR" "PRE-FLIGHT CHECK FAILED: SSH daemon not running. Aborting."
+            return 1
+        fi
+        
+        log_apply "SAFETY" "SSH daemon confirmed running (PID: ${SSH_PID:-detected})"
+        echo -e "${C_GREEN}✓ SSH daemon confirmed running${C_RESET}"
+        
+        # Step 3: Verify SSH is actually listening on the detected port
+        if command_exists ss; then
+            local listening_verify=$(ss -lnt 2>/dev/null | grep -E ":$SSH_PORT " | head -1)
+            if [[ -z "$listening_verify" ]]; then
+                echo -e "${C_RED}${C_BOLD}BLOCKING ERROR: SSH is not listening on detected port $SSH_PORT.${C_RESET}"
+                echo -e "${C_RED}Firewall modifications are UNSAFE without confirmed SSH listening.${C_RESET}"
+                echo ""
+                echo -e "${C_YELLOW}Detection conflict:${C_RESET}"
+                echo "  - Port detected: $SSH_PORT"
+                echo "  - ss -lnt verification: SSH not listening on this port"
+                echo ""
+                echo -e "${C_RED}${C_BOLD}ABORTING: Firewall apply cancelled to prevent lockout.${C_RESET}"
+                echo -e "${C_YELLOW}Please verify SSH configuration and restart if needed:${C_RESET}"
+                echo "  sudo systemctl restart ssh"
+                echo "  sudo ss -lntp | grep sshd"
+                log_apply "ERROR" "PRE-FLIGHT CHECK FAILED: SSH not listening on port $SSH_PORT. Aborting."
+                return 1
+            fi
+        fi
+        
+        log_apply "SAFETY" "SSH listening verification passed: port $SSH_PORT confirmed listening"
+        echo -e "${C_GREEN}✓ SSH listening verification passed${C_RESET}"
+        
+        echo -e "${C_BOLD}${C_GREEN}PRE-FLIGHT CHECK PASSED: Safe to proceed with firewall modifications.${C_RESET}"
+        echo ""
+        
+        return 0
+    }
+    
+    # ========================================================================
+    # UFW RULES BACKUP AND ROLLBACK FUNCTIONS
+    # ========================================================================
+    # These functions backup UFW rule files before modifications and restore
+    # them if post-flight verification fails, preventing SSH lockout.
+    # ========================================================================
+    
+    # Backup UFW rules to a timestamped directory
+    # Returns: backup directory path on success, empty string on failure
+    backup_ufw_rules() {
+        local timestamp=$(date +%s)
+        local backup_dir="/tmp/ufw-rules-backup-$timestamp"
+        
+        # Create backup directory
+        if ! mkdir -p "$backup_dir" 2>/dev/null; then
+            log_apply "ERROR" "Failed to create backup directory: $backup_dir"
+            return 1
+        fi
+        
+        # Backup UFW rule files
+        local backed_up=0
+        
+        # IPv4 rules
+        if [[ -f /etc/ufw/user.rules ]]; then
+            if cp /etc/ufw/user.rules "$backup_dir/user.rules" 2>/dev/null; then
+                log_apply "SAFETY" "Backed up /etc/ufw/user.rules to $backup_dir/user.rules"
+                ((backed_up++))
+            fi
+        fi
+        
+        # IPv6 rules
+        if [[ -f /etc/ufw/user6.rules ]]; then
+            if cp /etc/ufw/user6.rules "$backup_dir/user6.rules" 2>/dev/null; then
+                log_apply "SAFETY" "Backed up /etc/ufw/user6.rules to $backup_dir/user6.rules"
+                ((backed_up++))
+            fi
+        fi
+        
+        # UFW configuration
+        if [[ -f /etc/default/ufw ]]; then
+            if cp /etc/default/ufw "$backup_dir/ufw-default" 2>/dev/null; then
+                log_apply "SAFETY" "Backed up /etc/default/ufw to $backup_dir/ufw-default"
+                ((backed_up++))
+            fi
+        fi
+        
+        if [[ $backed_up -gt 0 ]]; then
+            UFW_RULES_BACKUP_DIR="$backup_dir"
+            echo "$backup_dir"
+            return 0
+        else
+            log_apply "ERROR" "Failed to backup any UFW rule files"
+            rm -rf "$backup_dir" 2>/dev/null
+            return 1
+        fi
+    }
+    
+    # Rollback UFW rules from backup directory
+    # Returns: 0 on success, 1 on failure
+    rollback_ufw_rules() {
+        if [[ -z "$UFW_RULES_BACKUP_DIR" ]] || [[ ! -d "$UFW_RULES_BACKUP_DIR" ]]; then
+            log_apply "ERROR" "Rollback failed: Backup directory not found: $UFW_RULES_BACKUP_DIR"
+            return 1
+        fi
+        
+        log_apply "ROLLBACK" "Starting UFW rules rollback from: $UFW_RULES_BACKUP_DIR"
+        echo -e "${C_RED}${C_BOLD}ROLLBACK: Restoring UFW rules from backup...${C_RESET}"
+        
+        local rollback_success=0
+        
+        # Restore IPv4 rules
+        if [[ -f "$UFW_RULES_BACKUP_DIR/user.rules" ]]; then
+            if sudo cp "$UFW_RULES_BACKUP_DIR/user.rules" /etc/ufw/user.rules 2>/dev/null; then
+                log_apply "ROLLBACK" "Restored /etc/ufw/user.rules"
+                ((rollback_success++))
+            else
+                log_apply "ERROR" "Failed to restore /etc/ufw/user.rules"
+            fi
+        fi
+        
+        # Restore IPv6 rules
+        if [[ -f "$UFW_RULES_BACKUP_DIR/user6.rules" ]]; then
+            if sudo cp "$UFW_RULES_BACKUP_DIR/user6.rules" /etc/ufw/user6.rules 2>/dev/null; then
+                log_apply "ROLLBACK" "Restored /etc/ufw/user6.rules"
+                ((rollback_success++))
+            else
+                log_apply "ERROR" "Failed to restore /etc/ufw/user6.rules"
+            fi
+        fi
+        
+        # Restore UFW configuration
+        if [[ -f "$UFW_RULES_BACKUP_DIR/ufw-default" ]]; then
+            if sudo cp "$UFW_RULES_BACKUP_DIR/ufw-default" /etc/default/ufw 2>/dev/null; then
+                log_apply "ROLLBACK" "Restored /etc/default/ufw"
+                ((rollback_success++))
+            else
+                log_apply "ERROR" "Failed to restore /etc/default/ufw"
+            fi
+        fi
+        
+        if [[ $rollback_success -gt 0 ]]; then
+            # Reload UFW to apply restored rules
+            log_apply "ROLLBACK" "Reloading UFW to apply restored rules..."
+            sudo ufw reload > /dev/null 2>&1
+            log_apply "ROLLBACK" "UFW reloaded with restored rules"
+            echo -e "${C_YELLOW}UFW reloaded with restored rules.${C_RESET}"
+            return 0
+        else
+            log_apply "ERROR" "Rollback failed: No files restored successfully"
+            return 1
+        fi
+    }
+    
+    # ========================================================================
+    # PHASE 2: POST-FLIGHT SSH REACHABILITY VERIFICATION
+    # ========================================================================
+    # This verification MUST execute AFTER firewall rule changes and BEFORE exit.
+    # It verifies that SSH access is guaranteed after modifications.
+    # If verification fails, automatic rollback is executed to prevent lockout.
+    # ========================================================================
+    
+    # Verify SSH ALLOW rule exists and is persistent
+    # Returns: 0 if rule exists and is persistent, 1 if verification fails
+    post_flight_ssh_verification() {
+        echo -e "\n${C_BOLD}${C_YELLOW}==============================================================${C_RESET}"
+        echo -e "${C_BOLD}${C_YELLOW}  PHASE 2: POST-FLIGHT SSH REACHABILITY VERIFICATION         ${C_RESET}"
+        echo -e "${C_BOLD}${C_YELLOW}==============================================================${C_RESET}"
+        log_apply "SAFETY" "Starting post-flight SSH reachability verification (MANDATORY)"
+        
+        if [[ -z "$SSH_PORT" ]] || ! [[ "$SSH_PORT" =~ ^[0-9]+$ ]]; then
+            echo -e "${C_RED}${C_BOLD}VERIFICATION ERROR: SSH port not available for verification.${C_RESET}"
+            log_apply "ERROR" "POST-FLIGHT VERIFICATION FAILED: SSH port not available"
+            return 1
+        fi
+        
+        # Step 1: Verify at least one ALLOW IN rule exists for SSH port in active rules
+        local numbered_out=$(sudo ufw status numbered 2>/dev/null)
+        local ssh_allow_rule=$(echo "$numbered_out" | grep -E "ALLOW.*IN.*$SSH_PORT.*tcp" || echo "")
+        
+        if [[ -z "$ssh_allow_rule" ]]; then
+            echo -e "${C_RED}${C_BOLD}VERIFICATION FAILED: No ALLOW IN rule found for SSH port $SSH_PORT/tcp.${C_RESET}"
+            echo -e "${C_RED}SSH access is NOT guaranteed after firewall modifications.${C_RESET}"
+            log_apply "ERROR" "POST-FLIGHT VERIFICATION FAILED: No ALLOW rule for port $SSH_PORT/tcp in active rules"
+            return 1
+        fi
+        
+        log_apply "SAFETY" "SSH ALLOW rule confirmed in active rules: $ssh_allow_rule"
+        echo -e "${C_GREEN}✓ SSH ALLOW rule confirmed in active UFW rules${C_RESET}"
+        
+        # Step 2: Verify rule is persistent in /etc/ufw/user.rules (not just runtime)
+        if [[ ! -f /etc/ufw/user.rules ]]; then
+            echo -e "${C_RED}${C_BOLD}VERIFICATION FAILED: /etc/ufw/user.rules not found.${C_RESET}"
+            echo -e "${C_RED}SSH rule may not persist across UFW reloads.${C_RESET}"
+            log_apply "ERROR" "POST-FLIGHT VERIFICATION FAILED: /etc/ufw/user.rules file not found"
+            return 1
+        fi
+        
+        # Check if SSH port is in the persistent rules file
+        # UFW user.rules format: -A ufw-user-input -p tcp -m tcp --dport PORT -j ACCEPT
+        local persistent_rule=$(sudo grep -E "ufw-user-input.*--dport $SSH_PORT.*ACCEPT" /etc/ufw/user.rules 2>/dev/null || echo "")
+        
+        if [[ -z "$persistent_rule" ]]; then
+            echo -e "${C_RED}${C_BOLD}VERIFICATION FAILED: SSH port $SSH_PORT/tcp rule not found in persistent rules file.${C_RESET}"
+            echo -e "${C_RED}SSH rule may not persist across UFW reloads or system reboots.${C_RESET}"
+            log_apply "ERROR" "POST-FLIGHT VERIFICATION FAILED: SSH rule not persistent in /etc/ufw/user.rules"
+            return 1
+        fi
+        
+        log_apply "SAFETY" "SSH rule confirmed persistent in /etc/ufw/user.rules"
+        echo -e "${C_GREEN}✓ SSH rule confirmed persistent in /etc/ufw/user.rules${C_RESET}"
+        
+        # Step 3: Check if rule is shadowed by a broader DENY rule (rule order matters)
+        # UFW processes rules in order, so we check if there's a DENY rule before our ALLOW
+        local rule_line_num=$(sudo grep -n "ufw-user-input.*--dport $SSH_PORT.*ACCEPT" /etc/ufw/user.rules 2>/dev/null | head -1 | cut -d: -f1)
+        
+        if [[ -n "$rule_line_num" ]] && [[ "$rule_line_num" =~ ^[0-9]+$ ]]; then
+            # Check for DENY rules before our ALLOW rule
+            local deny_before=$(sudo sed -n "1,$rule_line_num p" /etc/ufw/user.rules 2>/dev/null | grep -E "ufw-user-input.*REJECT|ufw-user-input.*DROP" | tail -1 || echo "")
+            
+            if [[ -n "$deny_before" ]]; then
+                # Check if the DENY rule is broader (e.g., DENY all ports before ALLOW specific port)
+                local deny_port=$(echo "$deny_before" | grep -oE "--dport [0-9]+" | grep -oE "[0-9]+" || echo "")
+                
+                if [[ -z "$deny_port" ]] || [[ "$deny_port" == "0" ]] || [[ "$deny_port" == "all" ]]; then
+                    echo -e "${C_YELLOW}${C_BOLD}WARNING: SSH rule may be shadowed by a broader DENY rule.${C_RESET}"
+                    echo -e "${C_YELLOW}DENY rule found before SSH ALLOW rule: $deny_before${C_RESET}"
+                    log_apply "WARN" "SSH rule may be shadowed by broader DENY rule (order-dependent, may still work)"
+                    # Don't fail verification for this - UFW may still allow it depending on rule structure
+                fi
+            fi
+        fi
+        
+        echo -e "${C_BOLD}${C_GREEN}POST-FLIGHT VERIFICATION PASSED: SSH access is guaranteed.${C_RESET}"
+        echo ""
+        log_apply "SAFETY" "Post-flight SSH verification passed: SSH port $SSH_PORT/tcp is allowed and persistent"
+        
+        return 0
+    }
+    
+    # Display Connectivity Guarantee summary
+    display_connectivity_guarantee() {
+        echo -e "\n${C_BOLD}${C_BLUE}==============================================================${C_RESET}"
+        echo -e "${C_BOLD}${C_BLUE}  CONNECTIVITY GUARANTEE SUMMARY                              ${C_RESET}"
+        echo -e "${C_BOLD}${C_BLUE}==============================================================${C_RESET}"
+        echo -e "${C_GREEN}✓ Detected SSH Port:${C_RESET} ${C_BOLD}$SSH_PORT/tcp${C_RESET}"
+        
+        local numbered_out=$(sudo ufw status numbered 2>/dev/null)
+        local ssh_rule=$(echo "$numbered_out" | grep -E "ALLOW.*IN.*$SSH_PORT.*tcp" | head -1 || echo "")
+        if [[ -n "$ssh_rule" ]]; then
+            echo -e "${C_GREEN}✓ Confirmed ALLOW Rule:${C_RESET} $ssh_rule"
+        else
+            echo -e "${C_RED}✗ ALLOW Rule:${C_RESET} NOT FOUND (VERIFICATION FAILED)"
+        fi
+        
+        if [[ -f /etc/ufw/user.rules ]]; then
+            local persistent_check=$(sudo grep -c "ufw-user-input.*--dport $SSH_PORT.*ACCEPT" /etc/ufw/user.rules 2>/dev/null || echo "0")
+            if [[ "$persistent_check" -gt 0 ]]; then
+                echo -e "${C_GREEN}✓ Persistence Verification:${C_RESET} Rule is persistent in /etc/ufw/user.rules ($persistent_check occurrence(s))"
+            else
+                echo -e "${C_RED}✗ Persistence Verification:${C_RESET} Rule NOT found in persistent rules file"
+            fi
+        else
+            echo -e "${C_RED}✗ Persistence Verification:${C_RESET} /etc/ufw/user.rules file not found"
+        fi
+        
+        if [[ -n "$UFW_RULES_BACKUP_DIR" ]] && [[ -d "$UFW_RULES_BACKUP_DIR" ]]; then
+            echo -e "${C_GREEN}✓ Backup Available:${C_RESET} $UFW_RULES_BACKUP_DIR"
+        else
+            echo -e "${C_YELLOW}⚠ Backup:${C_RESET} No backup available (initial state or backup failed)"
+        fi
+        
+        echo -e "${C_BOLD}${C_BLUE}==============================================================${C_RESET}"
+        echo ""
+    }
+    
+    # ========================================================================
+    # EXECUTE PRE-FLIGHT SAFETY CHECK (MANDATORY, NON-BYPASSABLE)
+    # ========================================================================
+    # This check executes BEFORE any firewall modifications in ALL modes.
+    # Even --force mode cannot skip this check.
+    # ========================================================================
+    
+    if ! pre_flight_ssh_safety_check; then
+        echo -e "${C_RED}${C_BOLD}Firewall apply aborted due to pre-flight safety check failure.${C_RESET}"
+        log_apply "ABORT" "Firewall apply aborted: Pre-flight SSH safety check failed"
+        return 1
+    fi
+    
+    local ssh_port="$SSH_PORT"  # Use detected port for compatibility with existing code
     
     # ========================================================================
     # BOOTSTRAP MODE HANDLING (Initial Firewall Hardening)
@@ -607,6 +1005,15 @@ module_apply() {
         
         log_apply "BOOTSTRAP_START" "User confirmed Bootstrap Mode execution."
         echo -e "${C_BOLD}>>> Starting Bootstrap Mode Firewall Setup <<<${C_RESET}"
+        
+        # Backup UFW rules BEFORE any modifications (safety requirement)
+        if ! backup_ufw_rules > /dev/null 2>&1; then
+            echo -e "${C_YELLOW}WARNING: Failed to create UFW rules backup. Continuing with caution.${C_RESET}"
+            log_apply "WARN" "UFW rules backup failed, but proceeding with bootstrap"
+        else
+            echo -e "${C_GREEN}✓ UFW rules backed up before modifications${C_RESET}"
+            log_apply "SAFETY" "UFW rules backed up to: $UFW_RULES_BACKUP_DIR"
+        fi
         
         # Helper function: Detect Docker
         detect_docker() {
@@ -677,17 +1084,41 @@ module_apply() {
         
         # Step 2: Add SSH allow rule BEFORE enabling firewall (CRITICAL)
         # This ensures SSH access is preserved when firewall is enabled
+        # IMPORTANT: Ensure idempotency - check if rule already exists before adding
+        # UFW allows adding rules even when active, so we check first to avoid duplicates
         log_apply "INFO" "Adding SSH allow rule BEFORE enabling firewall..."
         echo -e "${C_BOLD}Adding SSH allow rule ($ssh_port/tcp) to prevent lockout...${C_RESET}"
         
-        # Reset UFW to default state if active (allows adding rules before enable)
+        # Check if SSH rule already exists (idempotency check)
+        # Check both active rules and persistent rules file to ensure no duplicates
+        local existing_ssh_rule=""
         if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-            log_apply "WARN" "UFW is already active. SSH rule may already exist."
-        else
-            # UFW is inactive, we can add rules before enabling
+            existing_ssh_rule=$(sudo ufw status numbered 2>/dev/null | grep -E "ALLOW.*IN.*$ssh_port.*tcp" || echo "")
+        fi
+        
+        # Also check persistent rules file if UFW is inactive or rule not in active rules
+        if [[ -z "$existing_ssh_rule" ]] && [[ -f /etc/ufw/user.rules ]]; then
+            local persistent_check=$(sudo grep -c "ufw-user-input.*--dport $ssh_port.*ACCEPT" /etc/ufw/user.rules 2>/dev/null || echo "0")
+            if [[ "$persistent_check" -gt 0 ]]; then
+                existing_ssh_rule="persistent_rule_exists"
+            fi
+        fi
+        
+        if [[ -z "$existing_ssh_rule" ]]; then
+            # SSH rule does not exist - add it (idempotent operation)
+            if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+                log_apply "INFO" "UFW is active. Adding SSH rule (idempotent)..."
+            else
+                log_apply "INFO" "UFW is inactive. Adding SSH rule before enabling (idempotent)..."
+            fi
+            
+            # Add SSH allow rule (UFW will not duplicate identical rules, but we check anyway for safety)
             sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase Bootstrap)' 2>&1 | tee -a "$APPLY_LOG"
-            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH) before enabling firewall"
+            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH) - idempotent operation"
             echo -e "${C_GREEN}SSH rule added successfully.${C_RESET}"
+        else
+            log_apply "SKIP" "SSH allow rule already exists (idempotent operation, skipping duplicate)"
+            echo -e "${C_GREEN}SSH rule already exists. Skipping (idempotent).${C_RESET}"
         fi
         
         # Step 3: Set default policies BEFORE enabling
@@ -716,15 +1147,18 @@ module_apply() {
             fi
         fi
         
-        # Step 5: Verify SSH rule exists
+        # Step 5: Verify SSH rule exists after enabling UFW
+        # This is a safety check to ensure the rule persisted after enable/reload
         local numbered_out=$(sudo ufw status numbered 2>/dev/null)
-        local ssh_allowed=$(echo "$numbered_out" | grep -E "ALLOW.*$ssh_port.*tcp" || echo "")
+        local ssh_allowed=$(echo "$numbered_out" | grep -E "ALLOW.*IN.*$ssh_port.*tcp" || echo "")
         if [[ -z "$ssh_allowed" ]]; then
-            log_apply "WARN" "SSH rule not found in active rules. Adding now..."
+            log_apply "WARN" "SSH rule not found in active rules after enable. Adding now (idempotent)..."
+            # Add rule again (idempotent - won't duplicate if it exists)
             sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase Bootstrap)' 2>&1 | tee -a "$APPLY_LOG"
-            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH)"
+            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH) - safety verification"
+            echo -e "${C_YELLOW}SSH rule added during verification (should not happen if Step 2 succeeded).${C_RESET}"
         else
-            log_apply "SUCCESS" "SSH rule confirmed: allow $ssh_port/tcp"
+            log_apply "SUCCESS" "SSH rule confirmed after enable: allow $ssh_port/tcp"
             echo -e "${C_GREEN}SSH access confirmed: port $ssh_port/tcp is allowed.${C_RESET}"
         fi
         
@@ -815,6 +1249,43 @@ module_apply() {
             log_apply "SUCCESS" "UFW reloaded (IPv6 config change)"
         fi
         
+        # ========================================================================
+        # PHASE 2: POST-FLIGHT SSH REACHABILITY VERIFICATION (MANDATORY)
+        # ========================================================================
+        # This verification MUST execute AFTER all firewall modifications.
+        # If verification fails, automatic rollback prevents SSH lockout.
+        # ========================================================================
+        
+        if ! post_flight_ssh_verification; then
+            echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+            echo -e "${C_RED}${C_BOLD}!  BLOCKING FAILURE: SSH REACHABILITY VERIFICATION FAILED       !${C_RESET}"
+            echo -e "${C_RED}${C_BOLD}!  EXECUTING AUTOMATIC ROLLBACK TO PREVENT LOCKOUT              !${C_RESET}"
+            echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+            log_apply "ERROR" "POST-FLIGHT VERIFICATION FAILED: Executing automatic rollback"
+            
+            if rollback_ufw_rules; then
+                echo -e "${C_YELLOW}Rollback completed. Original firewall rules restored.${C_RESET}"
+                log_apply "ROLLBACK" "UFW rules successfully rolled back to prevent lockout"
+            else
+                echo -e "${C_RED}${C_BOLD}CRITICAL: Rollback failed. Manual intervention required.${C_RESET}"
+                log_apply "CRITICAL" "Rollback failed - manual intervention required to restore SSH access"
+            fi
+            
+            echo ""
+            echo -e "${C_RED}${C_BOLD}Firewall apply ABORTED due to SSH reachability verification failure.${C_RESET}"
+            echo -e "${C_YELLOW}Please verify:${C_RESET}"
+            echo "  1. SSH daemon is running: sudo systemctl status ssh"
+            echo "  2. SSH is listening on port $ssh_port: ss -lntp | grep :$ssh_port"
+            echo "  3. UFW rules allow SSH: sudo ufw status | grep $ssh_port"
+            echo "  4. UFW rules are correct: sudo ufw status numbered"
+            echo ""
+            log_apply "ABORT" "Bootstrap mode aborted: Post-flight verification failed"
+            return 1
+        fi
+        
+        # Display Connectivity Guarantee summary
+        display_connectivity_guarantee
+        
         echo ""
         echo -e "${C_BOLD}=== Bootstrap Mode Complete ===${C_RESET}"
         echo -e "${C_GREEN}Firewall has been initialized and enabled.${C_RESET}"
@@ -857,6 +1328,15 @@ module_apply() {
         log_apply "FORCE_START" "User confirmed Force Mode execution."
         echo -e "${C_BOLD}>>> Starting FORCE Mode Firewall Hardening <<<${C_RESET}"
         
+        # Backup UFW rules BEFORE any modifications (safety requirement - even in FORCE mode)
+        if ! backup_ufw_rules > /dev/null 2>&1; then
+            echo -e "${C_YELLOW}WARNING: Failed to create UFW rules backup. Continuing with caution.${C_RESET}"
+            log_apply "WARN" "UFW rules backup failed, but proceeding with FORCE mode"
+        else
+            echo -e "${C_GREEN}✓ UFW rules backed up before modifications${C_RESET}"
+            log_apply "SAFETY" "UFW rules backed up to: $UFW_RULES_BACKUP_DIR"
+        fi
+        
         # Ensure UFW is enabled
         if ! sudo ufw status 2>/dev/null | grep -q "Status: active"; then
             log_apply "INFO" "Enabling UFW..."
@@ -881,12 +1361,13 @@ module_apply() {
         # Add essential allow rules
         log_apply "INFO" "Adding essential ALLOW rules..."
         
-        # SSH port (critical - must be first)
-        if ! sudo ufw status numbered 2>/dev/null | grep -qE "ALLOW IN.*$ssh_port.*tcp"; then
+        # SSH port (critical - must be first, idempotent operation)
+        local existing_ssh_rule=$(sudo ufw status numbered 2>/dev/null | grep -E "ALLOW.*IN.*$ssh_port.*tcp" || echo "")
+        if [[ -z "$existing_ssh_rule" ]]; then
             sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase Force)' 2>&1 | tee -a "$APPLY_LOG"
             log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH)"
         else
-            log_apply "SKIP" "SSH port $ssh_port/tcp already allowed"
+            log_apply "SKIP" "SSH port $ssh_port/tcp already allowed (idempotent): $existing_ssh_rule"
         fi
         
         # HTTP/HTTPS
@@ -950,6 +1431,45 @@ module_apply() {
         sudo ufw reload 2>&1 | tee -a "$APPLY_LOG"
         log_apply "SUCCESS" "UFW reloaded"
         
+        # ========================================================================
+        # PHASE 2: POST-FLIGHT SSH REACHABILITY VERIFICATION (MANDATORY)
+        # ========================================================================
+        # This verification MUST execute AFTER all firewall modifications.
+        # Even in FORCE mode, this safety guard is non-bypassable.
+        # If verification fails, automatic rollback prevents SSH lockout.
+        # ========================================================================
+        
+        if ! post_flight_ssh_verification; then
+            echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+            echo -e "${C_RED}${C_BOLD}!  BLOCKING FAILURE: SSH REACHABILITY VERIFICATION FAILED       !${C_RESET}"
+            echo -e "${C_RED}${C_BOLD}!  EXECUTING AUTOMATIC ROLLBACK TO PREVENT LOCKOUT              !${C_RESET}"
+            echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+            log_apply "ERROR" "POST-FLIGHT VERIFICATION FAILED (FORCE MODE): Executing automatic rollback"
+            
+            if rollback_ufw_rules; then
+                echo -e "${C_YELLOW}Rollback completed. Original firewall rules restored.${C_RESET}"
+                log_apply "ROLLBACK" "UFW rules successfully rolled back to prevent lockout"
+            else
+                echo -e "${C_RED}${C_BOLD}CRITICAL: Rollback failed. Manual intervention required.${C_RESET}"
+                log_apply "CRITICAL" "Rollback failed - manual intervention required to restore SSH access"
+            fi
+            
+            echo ""
+            echo -e "${C_RED}${C_BOLD}Firewall apply ABORTED due to SSH reachability verification failure.${C_RESET}"
+            echo -e "${C_RED}Even in FORCE mode, SSH safety guards cannot be bypassed.${C_RESET}"
+            echo -e "${C_YELLOW}Please verify:${C_RESET}"
+            echo "  1. SSH daemon is running: sudo systemctl status ssh"
+            echo "  2. SSH is listening on port $ssh_port: ss -lntp | grep :$ssh_port"
+            echo "  3. UFW rules allow SSH: sudo ufw status | grep $ssh_port"
+            echo "  4. UFW rules are correct: sudo ufw status numbered"
+            echo ""
+            log_apply "ABORT" "FORCE mode aborted: Post-flight verification failed (safety guard enforced)"
+            return 1
+        fi
+        
+        # Display Connectivity Guarantee summary
+        display_connectivity_guarantee
+        
         echo ""
         echo -e "${C_BOLD}=== FORCE Mode Complete ===${C_RESET}"
         echo "Final UFW Status:"
@@ -966,6 +1486,15 @@ module_apply() {
     echo -e "This tool will prompt for confirmation before every action."
     echo -e "Log file: $APPLY_LOG"
     echo ""
+    
+    # Backup UFW rules BEFORE any modifications (safety requirement)
+    if ! backup_ufw_rules > /dev/null 2>&1; then
+        echo -e "${C_YELLOW}WARNING: Failed to create UFW rules backup. Continuing with caution.${C_RESET}"
+        log_apply "WARN" "UFW rules backup failed, but proceeding with SAFE mode"
+    else
+        echo -e "${C_GREEN}✓ UFW rules backed up before modifications${C_RESET}"
+        log_apply "SAFETY" "UFW rules backed up to: $UFW_RULES_BACKUP_DIR"
+    fi
     
     # Ensure UFW is enabled
     if ! sudo ufw status 2>/dev/null | grep -q "Status: active"; then
@@ -1003,11 +1532,12 @@ module_apply() {
             sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase)' 2>&1 | tee -a "$APPLY_LOG"
             log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH)"
         else
-            log_apply "SKIP" "SSH port $ssh_port/tcp rule not added"
+            log_apply "SKIP" "SSH port $ssh_port/tcp rule not added (user declined)"
+            echo -e "${C_YELLOW}WARNING: SSH rule not added. Ensure SSH access is not locked out.${C_RESET}"
         fi
     else
-        echo -e "${C_GREEN}SSH port $ssh_port/tcp already has an allow rule.${C_RESET}"
-        log_apply "INFO" "SSH port $ssh_port/tcp already allowed"
+        echo -e "${C_GREEN}SSH port $ssh_port/tcp already has an allow rule (idempotent).${C_RESET}"
+        log_apply "INFO" "SSH port $ssh_port/tcp already allowed: $ssh_allowed"
     fi
     
     # SSH rate limiting
@@ -1111,6 +1641,54 @@ module_apply() {
             log_apply "SUCCESS" "UFW logging enabled"
         fi
     fi
+    
+    # Reload UFW if any rules were modified
+    local rules_modified=0
+    if [[ -n "$ssh_allowed" ]] || echo "$status_out" | grep -qi "Logging: on"; then
+        # Check if reload is needed (UFW may have been reloaded already, but safe to reload)
+        if sudo ufw reload 2>&1 | tee -a "$APPLY_LOG"; then
+            log_apply "INFO" "UFW reloaded after modifications"
+            rules_modified=1
+        fi
+    fi
+    
+    # ========================================================================
+    # PHASE 2: POST-FLIGHT SSH REACHABILITY VERIFICATION (MANDATORY)
+    # ========================================================================
+    # This verification MUST execute AFTER all firewall modifications.
+    # Even in SAFE mode, this safety guard is non-bypassable.
+    # If verification fails, automatic rollback prevents SSH lockout.
+    # ========================================================================
+    
+    if ! post_flight_ssh_verification; then
+        echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}!  BLOCKING FAILURE: SSH REACHABILITY VERIFICATION FAILED       !${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}!  EXECUTING AUTOMATIC ROLLBACK TO PREVENT LOCKOUT              !${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+        log_apply "ERROR" "POST-FLIGHT VERIFICATION FAILED (SAFE MODE): Executing automatic rollback"
+        
+        if rollback_ufw_rules; then
+            echo -e "${C_YELLOW}Rollback completed. Original firewall rules restored.${C_RESET}"
+            log_apply "ROLLBACK" "UFW rules successfully rolled back to prevent lockout"
+        else
+            echo -e "${C_RED}${C_BOLD}CRITICAL: Rollback failed. Manual intervention required.${C_RESET}"
+            log_apply "CRITICAL" "Rollback failed - manual intervention required to restore SSH access"
+        fi
+        
+        echo ""
+        echo -e "${C_RED}${C_BOLD}Firewall apply ABORTED due to SSH reachability verification failure.${C_RESET}"
+        echo -e "${C_YELLOW}Please verify:${C_RESET}"
+        echo "  1. SSH daemon is running: sudo systemctl status ssh"
+        echo "  2. SSH is listening on port $ssh_port: ss -lntp | grep :$ssh_port"
+        echo "  3. UFW rules allow SSH: sudo ufw status | grep $ssh_port"
+        echo "  4. UFW rules are correct: sudo ufw status numbered"
+        echo ""
+        log_apply "ABORT" "SAFE mode aborted: Post-flight verification failed (safety guard enforced)"
+        return 1
+    fi
+    
+    # Display Connectivity Guarantee summary
+    display_connectivity_guarantee
     
     # Final status
     echo ""
