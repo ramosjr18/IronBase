@@ -123,20 +123,17 @@ engine_main() {
     local run_dir=$(init_reporting "$action" "$profile_path" "$flags_str")
     log_info "Output directory: $run_dir"
     
-    # Verify initialization succeeded and ensure IRONBASE_RUN_DIR is properly exported
+    # Verify initialization succeeded
+    # init_reporting() already exports IRONBASE_RUN_DIR, so it should be available
     if [[ -z "$run_dir" ]] || [[ ! -d "$run_dir" ]]; then
         log_error "Failed to initialize reporting system. Run directory: $run_dir"
         return 1
     fi
     
-    # Ensure IRONBASE_RUN_DIR is set correctly (defensive check)
-    if [[ -z "$IRONBASE_RUN_DIR" ]] || [[ ! -d "$IRONBASE_RUN_DIR" ]]; then
-        log_warn "IRONBASE_RUN_DIR not set correctly. Attempting to set from run_dir..."
+    # Defensive check: ensure IRONBASE_RUN_DIR matches the returned run_dir
+    if [[ -z "$IRONBASE_RUN_DIR" ]] || [[ "$IRONBASE_RUN_DIR" != "$run_dir" ]]; then
+        # Re-sync IRONBASE_RUN_DIR if it doesn't match (shouldn't happen, but defensive)
         export IRONBASE_RUN_DIR="$run_dir"
-        if [[ ! -d "$IRONBASE_RUN_DIR" ]]; then
-            log_error "Failed to set IRONBASE_RUN_DIR. Reporting may not work correctly."
-            return 1
-        fi
     fi
 
     # Discover modules

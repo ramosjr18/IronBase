@@ -102,6 +102,26 @@ register_finding() {
     local origin="${9:-}"
     local category="${10:-}"
     
+    # Defensive: Ensure GLOBAL_FINDINGS_FILE is set
+    # Use IRONBASE_RUN_DIR if available (exported), otherwise use GLOBAL_RUN_DIR
+    local run_dir="${IRONBASE_RUN_DIR:-${GLOBAL_RUN_DIR:-}}"
+    if [[ -z "$GLOBAL_FINDINGS_FILE" ]]; then
+        if [[ -n "$run_dir" ]] && [[ -d "$run_dir" ]]; then
+            GLOBAL_FINDINGS_FILE="$run_dir/.findings.tmp"
+        else
+            # If no run directory, skip registration (standalone mode or not initialized)
+            return 0
+        fi
+    fi
+    
+    # Ensure the findings file exists and is writable
+    if [[ ! -f "$GLOBAL_FINDINGS_FILE" ]]; then
+        touch "$GLOBAL_FINDINGS_FILE" 2>/dev/null || {
+            # Silently fail if we can't create the file (non-critical)
+            return 0
+        }
+    fi
+    
     # Escape special characters for JSON
     escape_json() {
         echo "$1" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/\t/\\t/g'
@@ -122,7 +142,10 @@ register_finding() {
     
     # Write finding to temporary file (one per line, pipe-delimited for parsing)
     # Format: ID|SEVERITY|STATUS|TITLE|DESCRIPTION|EVIDENCE|REMEDIATION|TYPE|ORIGIN|CATEGORY|MODULE|TIMESTAMP
-    echo "${id_escaped}|${severity_escaped}|${status_escaped}|${title_escaped}|${desc_escaped}|${evidence_escaped}|${remediation_escaped}|${type_escaped}|${origin_escaped}|${category_escaped}|${module_escaped}|${timestamp_escaped}" >> "$GLOBAL_FINDINGS_FILE"
+    echo "${id_escaped}|${severity_escaped}|${status_escaped}|${title_escaped}|${desc_escaped}|${evidence_escaped}|${remediation_escaped}|${type_escaped}|${origin_escaped}|${category_escaped}|${module_escaped}|${timestamp_escaped}" >> "$GLOBAL_FINDINGS_FILE" 2>/dev/null || {
+        # Silently fail if write fails (non-critical, findings will still appear in console)
+        return 0
+    }
 }
 
 # Generate final reports
@@ -158,6 +181,23 @@ generate_reports() {
 
 # Generate JSON report (complete serialization)
 generate_json_report() {
+    # Use exported IRONBASE_RUN_DIR (always available if init_reporting was called)
+    # Fallback to GLOBAL_RUN_DIR for backwards compatibility
+    local run_dir="${IRONBASE_RUN_DIR:-${GLOBAL_RUN_DIR:-}}"
+    
+    if [[ -z "$run_dir" ]] || [[ ! -d "$run_dir" ]]; then
+        echo "Error: Run directory not initialized. Cannot generate JSON report." >&2
+        return 1
+    fi
+    
+    # Synchronize GLOBAL_RUN_DIR with IRONBASE_RUN_DIR (ensure consistency)
+    GLOBAL_RUN_DIR="$run_dir"
+    
+    # Ensure GLOBAL_FINDINGS_FILE is set correctly
+    if [[ -z "$GLOBAL_FINDINGS_FILE" ]]; then
+        GLOBAL_FINDINGS_FILE="$GLOBAL_RUN_DIR/.findings.tmp"
+    fi
+    
     local json_file="$GLOBAL_RUN_DIR/report.json"
     
     # Start JSON structure
@@ -217,6 +257,23 @@ generate_json_report() {
 
 # Generate text report (human-readable)
 generate_text_report() {
+    # Use exported IRONBASE_RUN_DIR (always available if init_reporting was called)
+    # Fallback to GLOBAL_RUN_DIR for backwards compatibility
+    local run_dir="${IRONBASE_RUN_DIR:-${GLOBAL_RUN_DIR:-}}"
+    
+    if [[ -z "$run_dir" ]] || [[ ! -d "$run_dir" ]]; then
+        echo "Error: Run directory not initialized. Cannot generate text report." >&2
+        return 1
+    fi
+    
+    # Synchronize GLOBAL_RUN_DIR with IRONBASE_RUN_DIR (ensure consistency)
+    GLOBAL_RUN_DIR="$run_dir"
+    
+    # Ensure GLOBAL_FINDINGS_FILE is set correctly
+    if [[ -z "$GLOBAL_FINDINGS_FILE" ]]; then
+        GLOBAL_FINDINGS_FILE="$GLOBAL_RUN_DIR/.findings.tmp"
+    fi
+    
     local text_file="$GLOBAL_RUN_DIR/report.txt"
     local tmp_file="$GLOBAL_RUN_DIR/.report_tmp.txt"
     
@@ -315,6 +372,25 @@ generate_text_report() {
 
 # Generate summary (short, for console/CI)
 generate_summary() {
+    # Use exported IRONBASE_RUN_DIR (always available if init_reporting was called)
+    # Fallback to GLOBAL_RUN_DIR for backwards compatibility
+    local run_dir="${IRONBASE_RUN_DIR:-${GLOBAL_RUN_DIR:-}}"
+    
+    if [[ -z "$run_dir" ]] || [[ ! -d "$run_dir" ]]; then
+        echo "Error: Run directory not initialized. Cannot generate summary." >&2
+        return 1
+    fi
+    
+    # Synchronize GLOBAL_RUN_DIR with IRONBASE_RUN_DIR (ensure consistency)
+    GLOBAL_RUN_DIR="$run_dir"
+    
+    # Extract Run ID from directory path if GLOBAL_RUN_ID is empty
+    local run_id="${GLOBAL_RUN_ID:-}"
+    if [[ -z "$run_id" ]]; then
+        # Extract from run directory path (format: .../runs/YYYY-MM-DD_HH-MM-SS)
+        run_id=$(basename "$run_dir")
+    fi
+    
     local summary_file="$GLOBAL_RUN_DIR/summary.txt"
     local counts=$(calculate_counts)
     
@@ -338,7 +414,7 @@ generate_summary() {
         echo "IronBase Security Assessment Summary"
         echo "===================================="
         echo ""
-        echo "Run ID: $GLOBAL_RUN_ID"
+        echo "Run ID: $run_id"
         echo "Modules: ${#GLOBAL_MODULES[@]}"
         echo "Findings: $total"
         echo ""
@@ -374,9 +450,17 @@ generate_summary() {
 
 # Calculate counts by severity
 calculate_counts() {
+    # Ensure GLOBAL_FINDINGS_FILE is set correctly
+    local run_dir="${IRONBASE_RUN_DIR:-${GLOBAL_RUN_DIR:-}}"
+    local findings_file="${GLOBAL_FINDINGS_FILE:-}"
+    
+    if [[ -z "$findings_file" ]] && [[ -n "$run_dir" ]] && [[ -d "$run_dir" ]]; then
+        findings_file="$run_dir/.findings.tmp"
+    fi
+    
     local crit=0 high=0 medium=0 low=0 info=0
     
-    if [[ -f "$GLOBAL_FINDINGS_FILE" ]]; then
+    if [[ -n "$findings_file" ]] && [[ -f "$findings_file" ]]; then
         while IFS='|' read -r id sev status title desc evidence remediation type origin category module timestamp; do
             case "$sev" in
                 "CRITICAL") ((crit++)) ;;
@@ -385,7 +469,7 @@ calculate_counts() {
                 "LOW") ((low++)) ;;
                 *) ((info++)) ;;
             esac
-        done < "$GLOBAL_FINDINGS_FILE"
+        done < "$findings_file"
     fi
     
     local total=$((crit + high + medium + low + info))
