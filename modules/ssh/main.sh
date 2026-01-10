@@ -10,12 +10,30 @@ module_meta() {
 
 module_scan() {
     local script_dir="$(dirname "${BASH_SOURCE[0]}")"
+    
+    # Load module dependencies (constants and functions)
+    export MODULE_ROOT="$script_dir"
+    source "$script_dir/lib/common.sh"
+    
+    # Initialize log file
+    init_log_file
+    
+    # Load and run scanner
     source "$script_dir/scanners/ssh.sh"
     scan_ssh
+    
+    # Print summary and determine exit code
+    print_summary
+    return $?
 }
 
 module_apply() {
     local script_dir="$(dirname "${BASH_SOURCE[0]}")"
+    
+    # Load module dependencies (constants and colors for wizard)
+    export MODULE_ROOT="$script_dir"
+    source "$script_dir/lib/common.sh"
+    
     # Re-use wizard
     source "$script_dir/lib/wizard.sh"
     
