@@ -462,13 +462,395 @@ module_scan() {
 }
 
 module_apply() {
-    echo "APPLY: Ensuring UFW is installed..."
-    # sudo apt-get install -y ufw (Mocked)
+    # Initialize color constants (fallback if not already set from core/findings.sh)
+    if [[ -z "$C_RESET" ]]; then
+        C_RESET='\033[0m'
+        C_RED='\033[0;31m'
+        C_GREEN='\033[0;32m'
+        C_YELLOW='\033[0;33m'
+        C_BLUE='\033[0;34m'
+        C_BOLD='\033[1m'
+    fi
     
-    echo "APPLY: Enabling UFW..."
-    # sudo ufw enable (Mocked)
+    # Initialize helpers (fallback definitions if not available)
+    local APPLY_LOG="${VPS_APPLY_LOG:-firewall-apply.log}"
     
-    echo "APPLY: Setting default policies..."
-    # sudo ufw default deny incoming
-    # sudo ufw default allow outgoing
+    init_apply_log() {
+        echo "IronBase - Firewall Remediation Log" > "$APPLY_LOG"
+        echo "Date: $(date)" >> "$APPLY_LOG"
+        echo "Hostname: $(hostname)" >> "$APPLY_LOG"
+        echo "Mode: ${IRONBASE_FORCE:+FORCE}${IRONBASE_FORCE:-SAFE}" >> "$APPLY_LOG"
+        echo "-------------------------------------" >> "$APPLY_LOG"
+    }
+    
+    log_apply() {
+        local status="$1"
+        local msg="$2"
+        echo "[$status] $msg" >> "$APPLY_LOG"
+        echo -e "${C_BLUE}[$status]${C_RESET} $msg"
+    }
+    
+    backup_file() {
+        local file="$1"
+        local backup="${file}.bak.$(date +%s)"
+        if [[ -f "$file" ]]; then
+            cp "$file" "$backup"
+            log_apply "INFO" "Backed up $file to $backup"
+            echo -e "${C_BLUE}Backed up $file to $backup${C_RESET}"
+            return 0
+        fi
+        return 1
+    }
+    
+    confirm_action() {
+        local prompt="$1"
+        local default="${2:-N}"
+        
+        local options="[y/N]"
+        if [[ "$default" == "Y" ]]; then options="[Y/n]"; fi
+        
+        read -p "$(echo -e "${C_YELLOW}$prompt $options${C_RESET} "): " response < /dev/tty
+        response=${response:-$default}
+        
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            return 0
+        else
+            return 1
+        fi
+    }
+    
+    # Initialize log
+    init_apply_log
+    
+    # Check if UFW is installed
+    if ! command_exists ufw; then
+        log_apply "ERROR" "UFW is not installed. Please install it first: sudo apt-get install ufw"
+        echo -e "${C_RED}Error: UFW is not installed.${C_RESET}"
+        echo "Install with: sudo apt-get install ufw"
+        return 1
+    fi
+    
+    # Detect SSH port dynamically
+    detect_ssh_port() {
+        local ssh_port="22"
+        
+        # Try from sshd_config first
+        if [[ -f /etc/ssh/sshd_config ]]; then
+            local config_port=$(grep "^Port" /etc/ssh/sshd_config | awk '{print $2}' | head -n1 | tr -d '[:space:]')
+            if [[ -n "$config_port" ]] && [[ "$config_port" =~ ^[0-9]+$ ]] && [[ "$config_port" -ge 1 ]] && [[ "$config_port" -le 65535 ]]; then
+                ssh_port="$config_port"
+            fi
+        fi
+        
+        # Verify with ss if available
+        if command_exists ss; then
+            local listening_port=$(ss -lnt 2>/dev/null | grep -E ":$ssh_port " | head -1)
+            if [[ -z "$listening_port" ]]; then
+                # Try to find any SSH service
+                local alt_ports=$(ss -lnt 2>/dev/null | grep -E "sshd|ssh" | awk '{print $4}' | awk -F: '{print $NF}' | head -n1 | tr -d '[:space:]')
+                if [[ -n "$alt_ports" ]] && [[ "$alt_ports" =~ ^[0-9]+$ ]] && [[ "$alt_ports" -ge 1 ]] && [[ "$alt_ports" -le 65535 ]]; then
+                    ssh_port="$alt_ports"
+                fi
+            fi
+        fi
+        
+        echo "$ssh_port"
+    }
+    
+    local ssh_port=$(detect_ssh_port)
+    
+    # ========================================================================
+    # FORCE MODE HANDLING
+    # ========================================================================
+    if [[ "$IRONBASE_FORCE" == "true" ]]; then
+        echo -e "\n${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}!              FORCE MODE: FIREWALL HARDENING                      !${C_RESET}"
+        echo -e "${C_RED}${C_BOLD}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!${C_RESET}"
+        echo -e "${C_RED}WARNING: You have requested FORCE apply for firewall hardening.${C_RESET}"
+        echo -e "${C_RED}This will:${C_RESET}"
+        echo -e "${C_RED}  - Enforce UFW as the ONLY firewall (disable nftables)${C_RESET}"
+        echo -e "${C_RED}  - Add ALLOW rules for SSH ($ssh_port/tcp), 80/tcp, 443/tcp${C_RESET}"
+        echo -e "${C_RED}  - Add rate limiting to SSH${C_RESET}"
+        echo -e "${C_RED}  - DENY all other listening ports detected${C_RESET}"
+        echo -e "${C_RED}  - Disable IPv6 in UFW (unless already hardened)${C_RESET}"
+        echo -e "${C_RED}  - Modify system configurations without further confirmation${C_RESET}"
+        echo ""
+        echo -e "${C_RED}This action is potentially disruptive and may lock you out if SSH is not properly configured.${C_RESET}"
+        echo -e "${C_RED}Ensure you have console/VNC access before proceeding.${C_RESET}"
+        echo ""
+        
+        read -p "Confirm FORCE execution (type 'yes' to continue): " force_confirm < /dev/tty
+        if [[ "$force_confirm" != "yes" ]]; then
+            echo "Aborting Force Mode."
+            log_apply "ABORT" "User aborted Force Mode at warning screen."
+            return 1
+        fi
+        
+        log_apply "FORCE_START" "User confirmed Force Mode execution."
+        echo -e "${C_BOLD}>>> Starting FORCE Mode Firewall Hardening <<<${C_RESET}"
+        
+        # Ensure UFW is enabled
+        if ! sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+            log_apply "INFO" "Enabling UFW..."
+            sudo ufw --force enable 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "UFW enabled"
+        fi
+        
+        # Set default policies
+        log_apply "INFO" "Setting default deny incoming policy..."
+        sudo ufw default deny incoming 2>&1 | tee -a "$APPLY_LOG"
+        sudo ufw default allow outgoing 2>&1 | tee -a "$APPLY_LOG"
+        log_apply "SUCCESS" "Default policies set: deny incoming, allow outgoing"
+        
+        # Disable nftables if active
+        if command_exists systemctl && systemctl is-active --quiet nftables 2>/dev/null; then
+            log_apply "WARN" "Stopping and disabling nftables service (UFW-only enforcement)..."
+            sudo systemctl stop nftables 2>&1 | tee -a "$APPLY_LOG"
+            sudo systemctl disable nftables 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "nftables stopped and disabled"
+        fi
+        
+        # Add essential allow rules
+        log_apply "INFO" "Adding essential ALLOW rules..."
+        
+        # SSH port (critical - must be first)
+        if ! sudo ufw status numbered 2>/dev/null | grep -qE "ALLOW IN.*$ssh_port.*tcp"; then
+            sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase Force)' 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH)"
+        else
+            log_apply "SKIP" "SSH port $ssh_port/tcp already allowed"
+        fi
+        
+        # HTTP/HTTPS
+        for port in 80 443; do
+            if ! sudo ufw status numbered 2>/dev/null | grep -qE "ALLOW IN.*$port.*tcp"; then
+                local service_name="HTTP"
+                if [[ "$port" == "443" ]]; then service_name="HTTPS"; fi
+                sudo ufw allow "$port/tcp" comment "$service_name (IronBase Force)" 2>&1 | tee -a "$APPLY_LOG"
+                log_apply "SUCCESS" "Added UFW rule: allow $port/tcp ($service_name)"
+            else
+                log_apply "SKIP" "Port $port/tcp already allowed"
+            fi
+        done
+        
+        # Add SSH rate limiting
+        if ! sudo ufw status numbered 2>/dev/null | grep -qE "LIMIT.*$ssh_port.*tcp"; then
+            sudo ufw limit "$ssh_port/tcp" comment 'SSH Rate Limit (IronBase Force)' 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "Added UFW rate limit: limit $ssh_port/tcp (SSH)"
+        else
+            log_apply "SKIP" "SSH rate limit already configured"
+        fi
+        
+        # Deny all other listening ports
+        if command_exists ss; then
+            local listening_ports=$(ss -lntu 2>/dev/null | awk 'NR>1 && ($5 ~ /^0\.0\.0\.0/ || $5 ~ /^\[::\]/) {print $1, $5}' | awk -F: '{print $NF}' | sed 's/]//' | grep -E '^[0-9]+$' | sort -u)
+            
+            for port_line in $listening_ports; do
+                local port=$(echo "$port_line" | grep -oE '^[0-9]+$' | head -n1)
+                if [[ -z "$port" ]] || ! [[ "$port" =~ ^[0-9]+$ ]]; then continue; fi
+                
+                # Skip if already in essential list
+                if [[ "$port" == "$ssh_port" ]] || [[ "$port" == "80" ]] || [[ "$port" == "443" ]]; then
+                    continue
+                fi
+                
+                # Check if already denied
+                if ! sudo ufw status numbered 2>/dev/null | grep -qE "DENY.*$port"; then
+                    sudo ufw deny "$port/tcp" comment "Blocked by IronBase Force" 2>&1 | tee -a "$APPLY_LOG"
+                    sudo ufw deny "$port/udp" comment "Blocked by IronBase Force" 2>&1 | tee -a "$APPLY_LOG"
+                    log_apply "WARN" "Denied port $port (tcp/udp) - ensure no critical services are affected"
+                fi
+            done
+        fi
+        
+        # Handle IPv6
+        local ufw_ipv6_enabled=$(grep "^IPV6" /etc/default/ufw 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+        if [[ "$ufw_ipv6_enabled" != "no" ]]; then
+            backup_file /etc/default/ufw
+            log_apply "INFO" "Disabling IPv6 in UFW (Force mode)..."
+            sudo sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "IPv6 disabled in UFW (IPV6=no)"
+        fi
+        
+        # Enable logging
+        if sudo ufw status verbose 2>/dev/null | grep -qi "Logging: off"; then
+            sudo ufw logging on 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "UFW logging enabled"
+        fi
+        
+        # Reload UFW
+        sudo ufw reload 2>&1 | tee -a "$APPLY_LOG"
+        log_apply "SUCCESS" "UFW reloaded"
+        
+        echo ""
+        echo -e "${C_BOLD}=== FORCE Mode Complete ===${C_RESET}"
+        echo "Final UFW Status:"
+        sudo ufw status verbose
+        
+        return 0
+    fi
+    
+    # ========================================================================
+    # SAFE MODE (Interactive)
+    # ========================================================================
+    echo -e "\n${C_BOLD}Starting Interactive Firewall Hardening${C_RESET}"
+    echo -e "${C_YELLOW}WARNING: You are about to modify firewall configurations.${C_RESET}"
+    echo -e "This tool will prompt for confirmation before every action."
+    echo -e "Log file: $APPLY_LOG"
+    echo ""
+    
+    # Ensure UFW is enabled
+    if ! sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+        if confirm_action "UFW is inactive. Enable UFW now?" "Y"; then
+            log_apply "INFO" "Enabling UFW..."
+            sudo ufw --force enable 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "UFW enabled"
+        else
+            log_apply "SKIP" "UFW not enabled - aborting"
+            echo -e "${C_YELLOW}UFW must be active to continue. Exiting.${C_RESET}"
+            return 1
+        fi
+    fi
+    
+    # Check default policies
+    local status_out=$(sudo ufw status verbose 2>/dev/null)
+    if ! echo "$status_out" | grep -q "Default: deny (incoming)"; then
+        if confirm_action "Set default incoming policy to DENY?" "Y"; then
+            log_apply "INFO" "Setting default deny incoming..."
+            sudo ufw default deny incoming 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "Default incoming policy set to DENY"
+        fi
+    fi
+    
+    # Detect and handle SSH port
+    echo ""
+    echo -e "${C_BOLD}>>> SSH Port Configuration <<<${C_RESET}"
+    echo -e "Detected SSH port: ${C_GREEN}$ssh_port${C_RESET}"
+    
+    local numbered_out=$(sudo ufw status numbered 2>/dev/null)
+    local ssh_allowed=$(echo "$numbered_out" | grep -E "ALLOW.*$ssh_port.*tcp" || echo "")
+    
+    if [[ -z "$ssh_allowed" ]]; then
+        if confirm_action "Add UFW ALLOW rule for SSH port $ssh_port/tcp?" "Y"; then
+            sudo ufw allow "$ssh_port/tcp" comment 'SSH (IronBase)' 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "Added UFW rule: allow $ssh_port/tcp (SSH)"
+        else
+            log_apply "SKIP" "SSH port $ssh_port/tcp rule not added"
+        fi
+    else
+        echo -e "${C_GREEN}SSH port $ssh_port/tcp already has an allow rule.${C_RESET}"
+        log_apply "INFO" "SSH port $ssh_port/tcp already allowed"
+    fi
+    
+    # SSH rate limiting
+    local has_limit=$(echo "$numbered_out" | grep -E "LIMIT.*$ssh_port.*tcp" || echo "")
+    if [[ -z "$has_limit" ]]; then
+        if confirm_action "Add rate limiting to SSH port $ssh_port/tcp?" "N"; then
+            sudo ufw limit "$ssh_port/tcp" comment 'SSH Rate Limit (IronBase)' 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "Added UFW rate limit: limit $ssh_port/tcp (SSH)"
+        fi
+    else
+        echo -e "${C_GREEN}SSH rate limiting already configured.${C_RESET}"
+        log_apply "INFO" "SSH rate limit already exists"
+    fi
+    
+    # Multiple firewalls warning
+    local firewall_count=0
+    local active_firewalls=""
+    
+    if sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+        ((firewall_count++))
+        active_firewalls="${active_firewalls}ufw "
+    fi
+    
+    if command_exists systemctl && systemctl is-active --quiet nftables 2>/dev/null; then
+        ((firewall_count++))
+        active_firewalls="${active_firewalls}nftables "
+    fi
+    
+    if [[ $firewall_count -gt 1 ]]; then
+        echo ""
+        echo -e "${C_YELLOW}>>> Multiple Firewalls Active <<<${C_RESET}"
+        echo -e "Detected active firewalls: ${C_RED}${active_firewalls}${C_RESET}"
+        echo -e "Multiple firewalls can conflict and cause unexpected behavior."
+        echo -e "${C_YELLOW}NOTE: In SAFE mode, we will NOT disable other firewalls automatically.${C_RESET}"
+        echo -e "Consider disabling redundant firewalls manually if needed."
+        log_apply "WARN" "Multiple firewalls active: $active_firewalls (not auto-disabled in SAFE mode)"
+    fi
+    
+    # Exposed services
+    if command_exists ss; then
+        local listening_services=$(ss -lntup 2>/dev/null | awk 'NR>1 && ($5 ~ /^0\.0\.0\.0/ || $5 ~ /^\[::\]/) {print $1, $5, $7}' | head -10)
+        
+        if [[ -n "$listening_services" ]]; then
+            echo ""
+            echo -e "${C_BOLD}>>> Exposed Services Detection <<<${C_RESET}"
+            echo "Services listening on public interfaces:"
+            echo "$listening_services" | while read -r line; do
+                echo "  - $line"
+            done
+            
+            echo ""
+            echo -e "${C_YELLOW}For each service above, you can:${C_RESET}"
+            echo "  1. Add an ALLOW rule (if service should be accessible)"
+            echo "  2. Skip (if already managed or should remain as-is)"
+            echo ""
+            echo -e "${C_YELLOW}NOTE: We will NOT add DENY rules automatically in SAFE mode.${C_RESET}"
+            echo -e "Services not explicitly allowed will be handled by default policy."
+            log_apply "INFO" "Exposed services detected (not auto-denied in SAFE mode)"
+        fi
+    fi
+    
+    # IPv6 handling
+    echo ""
+    echo -e "${C_BOLD}>>> IPv6 Configuration <<<${C_RESET}"
+    local ufw_ipv6_enabled=$(grep "^IPV6" /etc/default/ufw 2>/dev/null | cut -d= -f2 | tr -d '[:space:]')
+    echo "Current UFW IPv6 setting: ${ufw_ipv6_enabled:-not set (default: yes)}"
+    
+    if [[ "$ufw_ipv6_enabled" != "no" ]]; then
+        echo "Options:"
+        echo "  1) Enforce IPv6 rules (keep IPV6=yes, ensure IPv6 rules are active)"
+        echo "  2) Disable IPv6 in UFW (set IPV6=no)"
+        echo "  3) Skip (keep current setting)"
+        
+        read -p "Choose option [1/2/3]: " ipv6_choice < /dev/tty
+        case "$ipv6_choice" in
+            1)
+                echo -e "${C_GREEN}Keeping IPv6 enabled. Verify IPv6 rules with: sudo ufw status verbose${C_RESET}"
+                log_apply "INFO" "IPv6 enforcement: keeping IPV6=yes (user should verify rules)"
+                ;;
+            2)
+                if confirm_action "Disable IPv6 in UFW? (IPV6=no)" "N"; then
+                    backup_file /etc/default/ufw
+                    sudo sed -i 's/^IPV6=.*/IPV6=no/' /etc/default/ufw 2>&1 | tee -a "$APPLY_LOG"
+                    log_apply "SUCCESS" "IPv6 disabled in UFW (IPV6=no)"
+                    echo -e "${C_YELLOW}UFW will need to be reloaded for this change to take effect.${C_RESET}"
+                fi
+                ;;
+            *)
+                log_apply "SKIP" "IPv6 configuration skipped"
+                ;;
+        esac
+    else
+        echo -e "${C_GREEN}IPv6 is already disabled in UFW (IPV6=no).${C_RESET}"
+        log_apply "INFO" "IPv6 already disabled"
+    fi
+    
+    # Logging
+    if echo "$status_out" | grep -qi "Logging: off"; then
+        if confirm_action "Enable UFW logging?" "Y"; then
+            sudo ufw logging on 2>&1 | tee -a "$APPLY_LOG"
+            log_apply "SUCCESS" "UFW logging enabled"
+        fi
+    fi
+    
+    # Final status
+    echo ""
+    echo -e "${C_BOLD}=== Interactive Mode Complete ===${C_RESET}"
+    echo "Final UFW Status:"
+    sudo ufw status verbose
+    echo ""
+    echo -e "Log saved to: ${C_BLUE}$APPLY_LOG${C_RESET}"
+    
+    return 0
 }
