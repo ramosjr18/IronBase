@@ -5,14 +5,14 @@ A self-contained security assessment module for public Linux VPS environments. T
 ## Features
 
 *   **Dual-Perspective Scanning**:
-    *   **Internal**: Checks kernel version, OS hardening, exposed internal services, SSH configuration, and system anomalies.
+    *   **Internal**: Checks kernel version, OS hardening, exposed internal services, SSH configuration (uses `ssh` module), and system anomalies.
     *   **External**: Simulates network exposure checks (Open ports, Public IP, SSH default port).
 *   **Structured Findings**: Categorizes findings by Severity (Critical to Info), Type (Vuln, Risk, Misconfig), and Origin.
 *   **Actionable Reporting**: Provides clear **Recommendations** and **Evidence** for every finding.
 *   **Auto-generated Report**: Saves a full detail report to `secure-vps-scan.txt` after every run.
 
 *   **Auto-generated Report**: Saves a full detail report to `secure-vps-scan.txt` after every run.
-*   **Integrated SSH Hardening**: Leverages the robust `secure-ssh` wizard for safe user creation and access management.
+*   **Integrated SSH Hardening**: Leverages the robust `ssh` module wizard for safe user creation and access management.
 
 ## Usage
 

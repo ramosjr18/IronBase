@@ -111,10 +111,11 @@ A self-contained module for assessing and securing public VPS instances.
 ./cmd/ironbase apply --module secure-vps
 ```
 
-### 🔐 `secure-ssh`
-A focused module for safe SSH hardening.
+### 🔐 `ssh`
+A focused module for safe SSH hardening with interactive wizard.
 
 **Capabilities:**
+- **Comprehensive Scan**: Checks PermitRootLogin, PasswordAuthentication, PermitEmptyPasswords
 - **Interactive Wizard**: Step-by-step user creation and root disabling
 - **Safety First**: Verified alternative access before blocking root
 - **Standalone**: Can be run on any machine independently
@@ -122,10 +123,10 @@ A focused module for safe SSH hardening.
 **Usage:**
 ```bash
 # Scan SSH configuration
-./cmd/ironbase scan --module secure-ssh
+./cmd/ironbase scan --module ssh
 
 # Apply SSH hardening (Interactive)
-./cmd/ironbase apply --module secure-ssh
+./cmd/ironbase apply --module ssh
 ```
 
 ### 🐛 `vulnerability`
@@ -196,7 +197,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a comprehensive overview of
 
 ### Module Documentation
 - **[Secure VPS Module](modules/secure-vps/README.md)**: Comprehensive VPS security assessment
-- **[Secure SSH Module](modules/secure-ssh/README.md)**: SSH hardening wizard
+- **[SSH Hardening Module](modules/ssh/README.md)**: SSH hardening wizard
 - **[Vulnerability Module](modules/vulnerability/README.md)**: Vulnerability assessment guide
 
 ### Scanners Reference

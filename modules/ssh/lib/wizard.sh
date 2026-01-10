@@ -1,5 +1,5 @@
 #!/bin/bash
-# modules/secure-ssh/lib/wizard.sh
+# modules/ssh/lib/wizard.sh
 # Shared SSH Hardening Logic
 
 # Ensure dependencies are available or mock them if running standalone without common lib

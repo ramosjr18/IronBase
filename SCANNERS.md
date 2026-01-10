@@ -11,7 +11,7 @@ IronBase employs a multi-layered scanning approach to identify vulnerabilities, 
 ### 1. Internal Scan (Host-Based)
 **Focus**: Inspects the local system configuration, file permissions, kernel state, and running services from "inside" the server.
 **Goal**: Identify weak configurations, legacy software, and potential privilege escalation vectors.
-**Modules Involved**: `secure-vps`, `secure-ssh`
+**Modules Involved**: `secure-vps`, `ssh`
 
 ### 2. External Scan (Network Simulation)
 **Focus**: Simulates how an attacker views the server from the internet.

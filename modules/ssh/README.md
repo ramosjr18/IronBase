@@ -1,10 +1,10 @@
-# Secure SSH Module (secure-ssh)
+# SSH Hardening Module
 
 A focused, robust hardening module for OpenSSH configuration. This module provides a safe, interactive wizard to harden SSH access, create sudo users, and disable root login without risk of lockout.
 
 ## Features
 
-*   **Diagnostic Scan**: Instantly audits `PermitRootLogin`, `PasswordAuthentication`, and existing User/Sudo privileges.
+*   **Diagnostic Scan**: Instantly audits `PermitRootLogin`, `PasswordAuthentication`, `PermitEmptyPasswords`, and existing User/Sudo privileges.
 *   **Interactive Wizard**: Guides you step-by-step through:
     *   Replacing root access with a new user.
     *   Creating new regular or sudo users.
@@ -20,10 +20,10 @@ A focused, robust hardening module for OpenSSH configuration. This module provid
 
 ```bash
 # 1. Scan (Audit Configuration)
-./cmd/ironbase scan --module secure-ssh
+./cmd/ironbase scan --module ssh
 
 # 2. Apply (Launch Hardening Wizard)
-./cmd/ironbase apply --module secure-ssh
+./cmd/ironbase apply --module ssh
 ```
 
 ### Standalone Mode
@@ -32,10 +32,10 @@ Run independently on any system:
 
 ```bash
 # Scan
-./modules/secure-ssh/standalone.sh
+./modules/ssh/standalone.sh
 
 # Apply (Interactive Wizard)
-./modules/secure-ssh/standalone.sh apply
+./modules/ssh/standalone.sh apply
 ```
 
 ## Hardening Wizard Flow
@@ -46,8 +46,8 @@ Run independently on any system:
     *   **Option 2: Add User**. Creates a new user but keeps root login enabled (for gradual migration).
     *   **Option 3: Review**. Exits without changes.
 3.  **Verification**: Before disabling root, the wizard verifies the potential new entry point exists and has sudo rights.
-4.  **Logging**: All actions are logged to `secure-ssh-apply.log`.
+4.  **Logging**: All actions are logged to `ssh-apply.log`.
 
 ## Relationship with `secure-vps`
 
-This module (`secure-ssh`) is the core SSH hardening logic provider. The `secure-vps` module imports the logic from here, ensuring consistent behavior across both modules.
+This module (`ssh`) is the core SSH hardening logic provider. The `secure-vps` module imports the logic from here, ensuring consistent behavior across both modules.

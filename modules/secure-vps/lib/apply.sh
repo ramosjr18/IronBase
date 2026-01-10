@@ -57,7 +57,7 @@ backup_file() {
 echo -e "\n${C_BOLD}>>> Finding: SSH Root Login Enabled (INT-SSH-001)${C_RESET}"
 
 # --- Shared Logic ---
-SOURCE_DIR="$(dirname "${BASH_SOURCE[0]}")/../../secure-ssh/lib"
+SOURCE_DIR="$(dirname "${BASH_SOURCE[0]}")/../../ssh/lib"
 if [[ -f "$SOURCE_DIR/wizard.sh" ]]; then
     source "$SOURCE_DIR/wizard.sh"
 else

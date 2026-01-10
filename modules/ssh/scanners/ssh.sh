@@ -1,5 +1,5 @@
 #!/bin/bash
-# modules/secure-ssh/scanners/ssh.sh
+# modules/ssh/scanners/ssh.sh
 # SSH Configuration Checks
 
 scan_ssh() {

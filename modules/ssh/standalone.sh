@@ -1,5 +1,5 @@
 #!/bin/bash
-# modules/secure-ssh/standalone.sh
+# modules/ssh/standalone.sh
 # Standalone runner for SSH Hardening
 
 # Resolve strictly absolute path to this script
@@ -15,7 +15,7 @@ export C_BOLD='\033[1m'
 export C_RESET='\033[0m'
 
 # Helpers
-export LOG_FILE="secure-ssh.log"
+export LOG_FILE="ssh-scan.log"
 vps_log() {
     echo "[$1] $2" >> "$LOG_FILE"
 }
@@ -60,7 +60,7 @@ if [[ "$MODE" == "scan" ]]; then
 
 elif [[ "$MODE" == "apply" ]]; then
     # Run Apply Wizard
-    export VPS_APPLY_LOG="secure-ssh-apply.log"
+    export VPS_APPLY_LOG="ssh-apply.log"
     
     # We need wizard.sh and basic helpers (log_apply, backup_file are in wizard.sh fallback or defined here)
     # Define helpers here to be safe and consistent with IronBase style
