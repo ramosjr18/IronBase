@@ -40,7 +40,8 @@ The following table details the specific checks performed by the scanners, their
 | **INT-USR-001** | **Critical** | **Multiple UID 0 Users** | Checks for users other than `root` with UID 0. <br>• **Risk**: Backdoors or unauthorized root-level accounts. |
 | **INT-USR-002** | **Critical** | **Empty Passwords** | Checks `/etc/shadow` for accounts with no password. <br>• **Risk**: Unrestricted access to accounts. |
 | **INT-SSH-001** | High | **SSH Root Login** | Checks `PermitRootLogin` in `sshd_config`. <br>• **Risk**: Brute-force attacks targeting the known `root` user. |
-| **INT-SSH-002** | Medium | **SSH Password Auth** | Checks `PasswordAuthentication` in `sshd_config`. <br>• **Risk**: Password guessing/brute-force acts. Keys are recommended. |
+| **INT-SSH-002** | Medium | **SSH Password Auth** | Checks `PasswordAuthentication` in `sshd_config`. <br>• **Risk**: Password guessing/brute-force attacks. Keys are recommended. |
+| **INT-SSH-003** | **Critical** | **SSH Empty Passwords** | Checks `PermitEmptyPasswords` in `sshd_config`. <br>• **Risk**: CRITICAL - Allows authentication without passwords. Immediate security risk. |
 
 ### Network & Services (Internal & External)
 
@@ -76,10 +77,85 @@ The following table details the specific checks performed by the scanners, their
 - **FW-002**: If UFW is inactive, scan stops immediately after reporting FW-002 (returns exit code 1). Advanced checks (FW-004 through FW-011) are **not executed**.
 - **Rationale**: Advanced firewall checks are only meaningful when UFW is installed and active. This prevents misleading results from checks that require an active firewall.
 
+### Filesystem Permissions
+
+| Finding ID | Severity | Check Description | Meaning & Risk |
+|:---|:---------|:------------------|:---------------|
+| **FS-001** | High | **/etc Ownership** | Verifies `/etc` directory ownership (must be root). <br>• **Risk**: If not root-owned, unauthorized modifications to system configuration are possible. |
+| **FS-002** | High | **World Writable /etc** | Detects world-writable files in `/etc` (maxdepth 2). <br>• **Risk**: Unauthorized users can modify system configuration files. |
+
+### Network Exposure (Basic)
+
+| Finding ID | Severity | Check Description | Meaning & Risk |
+|:---|:---------|:------------------|:---------------|
+| **NET-000** | Info | **Net Tools Missing** | Checks if `ss` command is available. <br>• **Risk**: Cannot perform network scanning without net tools. |
+| **NET-001** | Medium | **Global Listeners (IPv4)** | Detects services listening on `0.0.0.0` (all IPv4 interfaces). <br>• **Risk**: Services accessible from any network interface. |
+| **NET-002** | Medium | **Global Listeners (IPv6)** | Detects services listening on `[::]` (all IPv6 interfaces). <br>• **Risk**: Services accessible via IPv6 from any network interface. |
+| **NET-003** | Low | **IPv6 Status** | Checks IPv6 system-wide disable status. <br>• **Info**: IPv6 enabled/disabled status (informational). |
+
+### Services & Logging
+
+| Finding ID | Severity | Check Description | Meaning & Risk |
+|:---|:---------|:------------------|:---------------|
+| **SVC-001** | Info | **Docker Installed** | Detects Docker installation (presence or absence). <br>• **Info**: Reports Docker installation status. |
+| **SVC-002** | Low | **Docker Socket** | Checks Docker socket permissions (`/var/run/docker.sock`). <br>• **Risk**: Socket permissions determine who can use Docker. |
+| **SVC-003** | Medium | **auditd** | Verifies auditd installation and running status. <br>• **Risk**: If not running, system accounting may be incomplete. |
+| **SVC-004** | Low | **Journald Persistence** | Checks journald persistence configuration (`/var/log/journal` directory). <br>• **Info**: Persistent logging vs memory-only logging. |
+
+### System Updates & Config
+
+| Finding ID | Severity | Check Description | Meaning & Risk |
+|:---|:---------|:------------------|:---------------|
+| **SYS-001** | Info | **OS Detection** | Detects OS name and version from `/etc/os-release`. <br>• **Info**: System identification (informational). |
+| **SYS-002** | Info | **Kernel Version** | Reports current kernel version (`uname -r`). <br>• **Info**: Kernel identification (informational). |
+| **SYS-003** | Medium | **Time Synchronized** | Verifies system time synchronization status (`timedatectl`). <br>• **Risk**: If not synchronized, time-sensitive operations may fail or logs may be inaccurate. |
+| **SYS-004** | High | **System Updates** | Checks for pending system updates (Ubuntu/Debian-specific: `/var/lib/update-notifier/updates-available`). <br>• **Risk**: Unpatched vulnerabilities may be present. |
+| **SYS-005** | Medium | **Automatic Updates** | Verifies automatic update configuration (`/etc/apt/apt.conf.d/20auto-upgrades`). <br>• **Risk**: If not configured, security patches may not be applied automatically. |
+
+### Users & Privileges
+
+| Finding ID | Severity | Check Description | Meaning & Risk |
+|:---|:---------|:------------------|:---------------|
+| **USR-001** | **Critical** | **UID 0 Users** | Detects multiple users with UID 0 (superuser privilege). <br>• **Risk**: Multiple root-equivalent accounts indicate backdoors or unauthorized access. |
+| **USR-002** | High | **Empty Passwords** | Identifies users with empty passwords (requires root to read `/etc/shadow`). <br>• **Risk**: Accounts with no password allow unrestricted access. |
+| **USR-003** | High | **Sudoers NOPASSWD** | Checks for `NOPASSWD` directives in `/etc/sudoers`. <br>• **Risk**: NOPASSWD allows sudo access without password, increasing attack surface. |
+| **USR-004** | Medium | **Root Account Locked** | Verifies root account password lock status (Ubuntu standard: locked). <br>• **Info**: Root account lock status (informational, standard for Ubuntu). |
+
+**Note**: The `users` module also supports `--list` mode to display all system users with privilege levels, UID/GID, shell, home directory, and account status.
+
+### Vulnerability Assessment
+
+| Finding ID | Severity | Check Description | Meaning & Risk |
+|:---|:---------|:------------------|:---------------|
+| **VULN-DB-001** | Info | **Vulnerability DB Outdated** | Warns if vulnerability database is older than configured max age (default: 7 days). <br>• **Risk**: Outdated database may miss recent vulnerabilities. |
+| **VULN-DB-002** | Medium | **Vulnerability DB Missing** | Warns if vulnerability database is missing (scan limited but continues). <br>• **Risk**: Limited vulnerability coverage if database missing. |
+| **VULN-DB-003** | High | **Vulnerability DB Missing** | Fails if vulnerability database is missing (scan cannot proceed). <br>• **Risk**: Cannot perform vulnerability assessment without database. |
+| **VULN-OS-001** | **Critical** | **Package RCE Vulnerability** | Package affected by known Remote Code Execution vulnerability. <br>• **Risk**: CRITICAL - Remote code execution possible. |
+| **VULN-OS-002** | High | **Package Privilege Escalation** | Package affected by privilege escalation vulnerability. <br>• **Risk**: HIGH - Privilege escalation possible. |
+| **VULN-OS-003** | Medium | **Package Auth Bypass/Leak** | Package affected by authentication bypass or information leak vulnerability. <br>• **Risk**: MEDIUM - Authentication bypass or information disclosure. |
+| **VULN-OS-004** | Low | **Package DoS/Minor** | Package affected by Denial of Service or minor vulnerability. <br>• **Risk**: LOW - Service disruption or minor security issue. |
+| **VULN-KRN-001** | **Critical** | **End-of-Life Kernel** | Kernel < 4.19 (end-of-life, vulnerable to widely exploitable privesc). <br>• **Risk**: CRITICAL - End-of-life kernel with known vulnerabilities. |
+| **VULN-KRN-002** | High/Medium | **Legacy Kernel** | Kernel < 5.15 (legacy, vulnerable to privilege escalation). <br>• **Risk**: HIGH/MEDIUM - Legacy kernel with known vulnerabilities. |
+| **VULN-CRT-001** | **Critical** | **OpenSSL Critical Vulnerability** | OpenSSL affected by critical vulnerability. <br>• **Risk**: CRITICAL - Critical library vulnerability. |
+| **VULN-CRT-002** | High | **Sudo/Polkit Privesc** | Sudo or Polkit affected by privilege escalation vulnerability. <br>• **Risk**: HIGH - Privilege escalation in critical libraries. |
+| **VULN-CRT-003** | Medium/High | **OpenSSH Vulnerability** | OpenSSH affected by vulnerability. <br>• **Risk**: MEDIUM/HIGH - SSH vulnerability. |
+
+**Note**: The vulnerability module is read-only by design. It detects vulnerabilities but does not apply fixes automatically. Remediation must be performed using system package managers.
+
 ## How to Run Scanners
 
-Scanners are typically executed as part of the module workflows (e.g., specific flags in wizards), but can often be invoked via the core engine logic or specific module entry points.
+Scanners are executed via the IronBase engine or standalone module entry points. Each module follows the standard contract: `module_scan()` for scanning, `module_apply()` for remediation (if supported).
 
-*   **Secure VPS Module**: Runs comprehensive Internal + External scans.
-*   **SSH Module**: Runs focused SSH configuration scans (3 checks: PermitRootLogin, PasswordAuth, PermitEmptyPasswords).
-*   **Firewall Module**: Runs UFW baseline and advanced checks (11 checks total, fail-fast on prerequisites).
+**Module Scanning Overview**:
+
+*   **Secure VPS Module**: Comprehensive Internal + External scans (16 findings total, dual-perspective assessment, interactive remediation with FORCE mode)
+*   **SSH Module**: Focused SSH configuration scans (3 checks: PermitRootLogin, PasswordAuth, PermitEmptyPasswords) with interactive wizard
+*   **Firewall Module**: UFW baseline and advanced checks (11 checks total, fail-fast on prerequisites, 3 apply modes: SAFE, FORCE, BOOTSTRAP)
+*   **Vulnerability Module**: Host-based vulnerability assessment using USN database (package and kernel scanning, read-only, no apply support)
+*   **Network Module**: Basic network exposure checks (listening ports, IPv6 configuration, scan-only)
+*   **Services Module**: Service detection and logging (Docker, auditd, journald, scan-only)
+*   **System Module**: System configuration checks (OS version, kernel, time sync, updates, apply placeholder/non-functional)
+*   **Users Module**: User and privilege checks (UID 0 duplicates, empty passwords, sudoers, list mode available via `--list`, scan-only)
+*   **Filesystem Module**: Filesystem permissions checks (`/etc` ownership, world-writable files, scan-only)
+
+**For detailed module documentation including scan behavior, apply capabilities, safety notes, and usage examples, see each module's README.md file in `modules/<module-name>/README.md`**.

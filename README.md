@@ -100,7 +100,7 @@ A self-contained module for assessing and securing public VPS instances.
 - **Internal Analysis**: Kernel, Users, SSH, Services, Permissions
 - **External Simulation**: Exposure check, Public IP, Critical Ports
 - **Safe Remediation**: Interactive `apply` mode with backups and safety locks
-- **Reporting**: Generates a detailed `secure-vps-scan.txt` report
+- **Reporting**: All output saved to `output/runs/<run-id>/` (structured reporting system)
 
 **Usage:**
 ```bash
@@ -148,15 +148,26 @@ Host-based vulnerability assessment using Ubuntu Security Notices (USN).
 > **Note**: This module is read-only by design. It detects vulnerabilities but does not apply fixes automatically.
 
 ### 🔧 Additional Modules
-- **`system`**: OS, Kernel, Updates, Time configuration
-- **`users`**: Privileges, Sudoers, Root access management
-  - **List Users**: `./cmd/ironbase scan --module users --list` - Display all system users with privilege levels (ROOT/SUDO/USER), UID/GID, shell, home directory, and account status
-- **`network`**: Ports, Binding, IPv6 configuration
-- **`firewall`**: UFW Status & Policies (11 checks, fail-fast on prerequisites)
-  - **Fail-Fast Behavior**: If UFW is inactive, the firewall scan stops after FW-002. Advanced checks (FW-004 through FW-011) are not executed.
-- **`ssh`**: SSH configuration hardening (3 checks with interactive wizard)
-- **`services`**: Docker, Auditd, Journald service management
-- **`filesystem`**: File permissions and filesystem security
+
+All modules are documented with comprehensive READMEs. Each module includes:
+- Overview and context
+- What it does (and what it does NOT do)
+- Scan and apply behavior
+- Safety notes and usage examples
+- Current status and pending features
+
+**Available Modules**:
+- **`filesystem`**: Filesystem permissions checks (`/etc` ownership, world-writable files) - [Documentation](modules/filesystem/README.md)
+- **`firewall`**: UFW auditing and hardening (11 checks, 3 apply modes: SAFE, FORCE, BOOTSTRAP) - [Documentation](modules/firewall/README.md)
+- **`network`**: Network exposure checks (listening ports, IPv6 configuration) - [Documentation](modules/network/README.md)
+- **`services`**: Service detection and logging (Docker, auditd, journald) - [Documentation](modules/services/README.md)
+- **`ssh`**: SSH hardening wizard (3 checks, interactive user creation) - [Documentation](modules/ssh/README.md)
+- **`system`**: System configuration checks (OS version, kernel, time sync, updates) - [Documentation](modules/system/README.md)
+- **`users`**: User and privilege checks (UID 0 duplicates, empty passwords, sudoers) - [Documentation](modules/users/README.md)
+
+**Special Features**:
+- **`users` module list mode**: `./cmd/ironbase scan --module users --list` - Display all system users with privilege levels (ROOT/SUDO/USER), UID/GID, shell, home directory, and account status
+- **`firewall` module fail-fast**: If UFW is inactive, the firewall scan stops after FW-002. Advanced checks (FW-004 through FW-011) are not executed.
 
 ---
 
@@ -169,9 +180,15 @@ Host-based vulnerability assessment using Ubuntu Security Notices (USN).
 
 ### 🔒 Safe Remediation Workflow
 1. **Always scan first**: `./cmd/ironbase scan --module <module>`
-2. **Review findings**: Check the generated report file
+2. **Review findings**: Check the generated reports in `output/runs/<run-id>/`
+   - `report.json`: Machine-readable findings
+   - `report.txt`: Human-readable detailed report
+   - `summary.txt`: Executive summary
+   - `<module>.log`: Module-specific logs
 3. **Apply interactively**: `./cmd/ironbase apply --module <module>` (prompts for each change)
 4. **Verify**: Run scan again to confirm fixes
+
+**Note**: All outputs are saved to `output/runs/<run-id>/` to keep project root clean. No artifacts are written to the root directory.
 
 ### ⚠️ Force Mode Warning
 Force mode (`--force`) bypasses all safety checks:
@@ -197,10 +214,24 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a comprehensive overview of
 - Future migration path to compiled binaries
 
 ### Module Documentation
-- **[Secure VPS Module](modules/secure-vps/README.md)**: Comprehensive VPS security assessment
+
+All modules include comprehensive technical documentation with:
+- Overview and security context
+- Current capabilities and explicit limitations
+- Scan and apply behavior details
+- Safety notes and usage examples
+- Status and pending features
+
+**Module READMEs**:
+- **[Filesystem Module](modules/filesystem/README.md)**: Filesystem permissions checks
+- **[Firewall Module](modules/firewall/README.md)**: UFW auditing and hardening (11 checks, 3 apply modes)
+- **[Network Module](modules/network/README.md)**: Network exposure checks
+- **[Secure VPS Module](modules/secure-vps/README.md)**: Comprehensive VPS security assessment (dual-perspective)
+- **[Services Module](modules/services/README.md)**: Service detection and logging
 - **[SSH Hardening Module](modules/ssh/README.md)**: SSH hardening wizard
-- **[Vulnerability Module](modules/vulnerability/README.md)**: Vulnerability assessment guide
-- **[Firewall Module](modules/firewall/README.md)**: UFW auditing with fail-fast behavior
+- **[System Module](modules/system/README.md)**: System configuration checks
+- **[Users Module](modules/users/README.md)**: User and privilege checks
+- **[Vulnerability Module](modules/vulnerability/README.md)**: Vulnerability assessment guide (read-only)
 
 ### Scanners Reference
 See [SCANNERS.md](SCANNERS.md) for detailed information about:
