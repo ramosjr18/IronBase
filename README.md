@@ -152,8 +152,9 @@ Host-based vulnerability assessment using Ubuntu Security Notices (USN).
 - **`users`**: Privileges, Sudoers, Root access management
   - **List Users**: `./cmd/ironbase scan --module users --list` - Display all system users with privilege levels (ROOT/SUDO/USER), UID/GID, shell, home directory, and account status
 - **`network`**: Ports, Binding, IPv6 configuration
-- **`firewall`**: UFW Status & Policies
-- **`ssh`**: SSH configuration hardening
+- **`firewall`**: UFW Status & Policies (11 checks, fail-fast on prerequisites)
+  - **Fail-Fast Behavior**: If UFW is inactive, the firewall scan stops after FW-002. Advanced checks (FW-004 through FW-011) are not executed.
+- **`ssh`**: SSH configuration hardening (3 checks with interactive wizard)
 - **`services`**: Docker, Auditd, Journald service management
 - **`filesystem`**: File permissions and filesystem security
 
@@ -199,6 +200,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for a comprehensive overview of
 - **[Secure VPS Module](modules/secure-vps/README.md)**: Comprehensive VPS security assessment
 - **[SSH Hardening Module](modules/ssh/README.md)**: SSH hardening wizard
 - **[Vulnerability Module](modules/vulnerability/README.md)**: Vulnerability assessment guide
+- **[Firewall Module](modules/firewall/README.md)**: UFW auditing with fail-fast behavior
 
 ### Scanners Reference
 See [SCANNERS.md](SCANNERS.md) for detailed information about:

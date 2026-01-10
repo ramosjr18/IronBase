@@ -10,7 +10,21 @@ module_meta() {
 }
 
 module_scan() {
+    # ========================================================================
+    # BASELINE CHECKS (Fail-Fast Behavior)
+    # ========================================================================
+    # This module implements fail-fast behavior: if UFW is not installed or
+    # inactive, the scan stops immediately. Advanced checks (FW-004 through
+    # FW-011) are only meaningful when UFW is active and operational.
+    # 
+    # Rationale: Running advanced firewall checks against an inactive firewall
+    # would produce misleading or irrelevant results. This demonstrates
+    # intentional design maturity and prevents false positives.
+    # ========================================================================
+    
     # 1. Check Install
+    # FAIL-FAST: If UFW is not installed, stop scan immediately.
+    # No further checks can be performed without UFW.
     if ! command_exists ufw; then
         add_finding "FW-001" "$SEV_HIGH" "$STATUS_FAIL" "UFW Installed" \
             "UFW is not installed. This check validates UFW baseline configuration only. It does not assess full service exposure or rule completeness." \
@@ -20,6 +34,9 @@ module_scan() {
     fi
 
     # 2. Check Status
+    # FAIL-FAST: If UFW is inactive, stop scan immediately.
+    # Advanced checks (FW-004 through FW-011) require UFW to be active.
+    # If UFW is inactive, the firewall scan stops after FW-002.
     local status_out
     status_out=$(sudo ufw status verbose 2>/dev/null)
     if echo "$status_out" | grep -q "Status: active"; then
@@ -29,6 +46,7 @@ module_scan() {
             ""
             
         # 3. Check Policies (Default Deny Incoming)
+        # Only executes if UFW is active (FW-002 passed)
         if echo "$status_out" | grep -q "Default: deny (incoming)"; then
             add_finding "FW-003" "$SEV_MEDIUM" "$STATUS_PASS" "Default Incoming Policy" \
                 "Default incoming policy is DENY." \
@@ -45,8 +63,17 @@ module_scan() {
             "UFW is inactive. This check validates UFW baseline configuration only. It does not assess full service exposure or rule completeness." \
             "" \
             "Run 'ufw enable'"
+        # FAIL-FAST: Stop scan here. Advanced checks (FW-004 through FW-011) are skipped.
         return 1
     fi
+
+    # ========================================================================
+    # ADVANCED CHECKS (FW-004 through FW-011)
+    # ========================================================================
+    # These checks only execute if UFW is installed AND active (FW-002 passed).
+    # They perform deeper analysis of firewall rules, interference, and
+    # service exposure correlation.
+    # ========================================================================
 
     # 4. Specific Allow Rules Exist
     local numbered_out

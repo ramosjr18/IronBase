@@ -8,6 +8,7 @@ IronBase is a modular, future-proof Linux hardening engine. While v0 is implemen
 2.  **Idempotency**: All operations (scan/apply) should be safe to run multiple times.
 3.  **Observability**: Structured output (Findings Model) for easy parsing by future GUI/web layers.
 4.  **Safety**: "Scan" is read-only. "Apply" is opt-in and conservative.
+5.  **Fail-Fast Behavior**: Modules may implement fail-fast logic for critical prerequisites. If a module requires a prerequisite (e.g., UFW installed and active), it should stop scanning immediately when the prerequisite is not met, rather than continuing with checks that would produce misleading results.
 
 ## System Components
 
@@ -57,8 +58,10 @@ Self-contained units of hardening logic covering:
 
 Each module implements:
 -   `module_meta`: Metadata.
--   `module_scan`: Read-only checks returning structured Findings.
+-   `module_scan`: Read-only checks returning structured Findings. May implement fail-fast behavior for prerequisites.
 -   `module_apply`: Active remediation (if implemented).
+
+**Fail-Fast Example**: The `firewall` module stops scanning if UFW is not installed (FW-001) or inactive (FW-002). If UFW is inactive, the firewall scan stops after FW-002. This prevents advanced checks (FW-004 through FW-011) from executing when they would be meaningless or produce misleading results.
 
 ### 4. Profiles (`profiles/`)
 YAML files that define the desired state.

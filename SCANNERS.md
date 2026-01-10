@@ -55,9 +55,31 @@ The following table details the specific checks performed by the scanners, their
 | **INT-NET-003** | Info | **Expected Services** | Web ports (80, 443) or VoIP ports open. <br>• **Meaning**: Standard operation for a web/app server. |
 | **INT-NET-001** | Medium | **Unclassified Services** | Any other service listening publicly not in the allowlist. <br>• **Risk**: Potential unknown exposure. |
 
+### Firewall (UFW-based)
+
+| Finding ID | Severity | Check Description | Meaning & Risk |
+|:---|:---------|:------------------|:---------------|
+| **FW-001** | High | **UFW Installed** | Verifies UFW package is installed. <br>• **Fail-Fast**: Scan stops if UFW not installed. |
+| **FW-002** | High | **UFW Status** | Verifies UFW is active. <br>• **Fail-Fast**: **If UFW is inactive, the firewall scan stops after FW-002.** Advanced checks (FW-004 through FW-011) are not executed. |
+| **FW-003** | Medium/High | **Default Incoming Policy** | Verifies default incoming policy is DENY. <br>• **Risk**: If not DENY, services may be exposed unintentionally. |
+| **FW-004** | High/Medium | **Specific Allow Rules Exist** | Detects explicit ALLOW IN rules. Verifies SSH port is allowed if listening. <br>• **Risk**: Default deny with no allow rules may lock out legitimate access. |
+| **FW-005** | Medium/Low | **Docker / nftables Interference** | Detects Docker service and DOCKER chains. Warns if bypass potential exists. <br>• **Risk**: Docker may bypass UFW rules, exposing ports unintentionally. |
+| **FW-006** | High/Medium | **Multiple Firewalls Active** | Detects ufw, firewalld, nftables, and manual iptables. <br>• **Risk**: Multiple firewalls can conflict, causing unpredictable behavior. |
+| **FW-007** | High/Medium | **Real Service Exposure (Correlated)** | Parses listening services and correlates with UFW rules. <br>• **Risk**: Services listening on public interfaces without firewall control are exposed to internet. |
+| **FW-008** | High/Medium/Low | **Forwarding / NAT Policy** | Checks IPv4/IPv6 forwarding and UFW routed policies. <br>• **Risk**: Forwarding enabled without firewall intent may expose internal networks. |
+| **FW-009** | Medium/Low | **Logging & Rate Limiting** | Verifies UFW logging status and detects `limit` rules. <br>• **Risk**: Without logging or rate limits, brute-force attacks may go undetected. |
+| **FW-010** | High/Medium | **IPv6 Enforcement** | Verifies IPV6=yes in /etc/default/ufw and IPv6 rules presence. <br>• **Risk**: If IPv6 is enabled system-wide but UFW IPv6 is disabled, IPv6 traffic bypasses firewall. |
+| **FW-011** | Medium/Low/Info | **Configuration Drift** | Compares listening ports vs UFW allow rules. <br>• **Risk**: Services listening without corresponding firewall rules indicate configuration drift. |
+
+**Important Fail-Fast Behavior**: 
+- **FW-001**: If UFW is not installed, scan stops immediately (returns exit code 1).
+- **FW-002**: If UFW is inactive, scan stops immediately after reporting FW-002 (returns exit code 1). Advanced checks (FW-004 through FW-011) are **not executed**.
+- **Rationale**: Advanced firewall checks are only meaningful when UFW is installed and active. This prevents misleading results from checks that require an active firewall.
+
 ## How to Run Scanners
 
 Scanners are typically executed as part of the module workflows (e.g., specific flags in wizards), but can often be invoked via the core engine logic or specific module entry points.
 
 *   **Secure VPS Module**: Runs comprehensive Internal + External scans.
-*   **Secure SSH Module**: Runs focused SSH configuration scans.
+*   **SSH Module**: Runs focused SSH configuration scans (3 checks: PermitRootLogin, PasswordAuth, PermitEmptyPasswords).
+*   **Firewall Module**: Runs UFW baseline and advanced checks (11 checks total, fail-fast on prerequisites).
