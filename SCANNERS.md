@@ -82,7 +82,21 @@ The following table details the specific checks performed by the scanners, their
 | Finding ID | Severity | Check Description | Meaning & Risk |
 |:---|:---------|:------------------|:---------------|
 | **FS-001** | High | **/etc Ownership** | Verifies `/etc` directory ownership (must be root). <br>• **Risk**: If not root-owned, unauthorized modifications to system configuration are possible. |
-| **FS-002** | High | **World Writable /etc** | Detects world-writable files in `/etc` (maxdepth 2). <br>• **Risk**: Unauthorized users can modify system configuration files. |
+| **FS-002** | High | **World Writable /etc** | Detects world-writable files in `/etc` (recursive, depth 3). <br>• **Risk**: Unauthorized users can modify system configuration files. |
+| **FS-003** | High | **/boot Ownership** | Verifies `/boot` directory ownership (must be root, if exists). <br>• **Risk**: If not root-owned, bootloader and kernel files may be compromised. |
+| **FS-004** | High | **/root Ownership** | Verifies `/root` directory ownership (must be root, if exists). <br>• **Risk**: If not root-owned, root's home directory may be accessible to unauthorized users. |
+| **FS-005** | High | **/var/log Ownership** | Verifies `/var/log` directory ownership (must be root). <br>• **Risk**: If not root-owned, log files may be tampered with or deleted. |
+| **FS-006** | High | **/usr/bin Ownership** | Verifies `/usr/bin` directory ownership (must be root). <br>• **Risk**: If not root-owned, system binaries may be replaced with malicious versions. |
+| **FS-007** | High | **/usr/sbin Ownership** | Verifies `/usr/sbin` directory ownership (must be root). <br>• **Risk**: If not root-owned, administrative binaries may be compromised. |
+| **FS-008** | High | **World Writable /boot** | Detects world-writable files in `/boot` (if exists, depth 2). <br>• **Risk**: Bootloader or kernel files may be modified by unauthorized users. |
+| **FS-009** | High | **World Writable /root** | Detects world-writable files in `/root` (if exists, depth 2). <br>• **Risk**: Root's private files may be modified by unauthorized users. |
+| **FS-010** | High | **World Writable /var/log** | Detects world-writable files in `/var/log` (depth 2). <br>• **Risk**: Log files may be tampered with or deleted. |
+| **FS-011** | Medium | **/etc Permissions** | Verifies `/etc` permissions (should be 755 or stricter). <br>• **Risk**: Overly permissive permissions allow unauthorized access to configuration files. |
+| **FS-012** | Medium | **/root Permissions** | Verifies `/root` permissions (should be 700). <br>• **Risk**: Overly permissive permissions allow unauthorized access to root's home directory. |
+| **FS-013** | Medium | **/boot Permissions** | Verifies `/boot` permissions (should be 755). <br>• **Risk**: Overly permissive permissions allow unauthorized access to boot files. |
+| **FS-014** | High/Medium/Info | **SUID Binaries** | Scans for SUID binaries in system directories. Flags unexpected SUID binaries as security risk. <br>• **Risk**: SUID binaries run with owner privileges. Unexpected SUID binaries may allow privilege escalation if compromised. |
+| **FS-015** | Medium | **SGID Binaries** | Scans for SGID binaries in system directories (informational). <br>• **Risk**: SGID binaries run with group privileges. Review for unnecessary SGID binaries. |
+| **FS-016** | High | **World Writable PATH Directory** | Detects world-writable directories in PATH. <br>• **Risk**: CRITICAL - Allows privilege escalation. Attackers can write malicious binaries to PATH directories and hijack commands. |
 
 ### Network Exposure (Basic)
 
@@ -156,6 +170,6 @@ Scanners are executed via the IronBase engine or standalone module entry points.
 *   **Services Module**: Service detection and logging (Docker, auditd, journald, scan-only)
 *   **System Module**: System configuration checks (OS version, kernel, time sync, updates, apply placeholder/non-functional)
 *   **Users Module**: User and privilege checks (UID 0 duplicates, empty passwords, sudoers, list mode available via `--list`, scan-only)
-*   **Filesystem Module**: Filesystem permissions checks (`/etc` ownership, world-writable files, scan-only)
+*   **Filesystem Module**: Filesystem permissions checks (16 checks: ownership, permissions, SUID/SGID binaries, PATH security, with interactive remediation)
 
 **For detailed module documentation including scan behavior, apply capabilities, safety notes, and usage examples, see each module's README.md file in `modules/<module-name>/README.md`**.

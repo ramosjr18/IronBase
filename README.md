@@ -157,7 +157,7 @@ All modules are documented with comprehensive READMEs. Each module includes:
 - Current status and pending features
 
 **Available Modules**:
-- **`filesystem`**: Filesystem permissions checks (`/etc` ownership, world-writable files) - [Documentation](modules/filesystem/README.md)
+- **`filesystem`**: Filesystem permissions checks (16 checks: ownership, permissions, SUID/SGID binaries, PATH security, with interactive remediation) - [Documentation](modules/filesystem/README.md)
 - **`firewall`**: UFW auditing and hardening (11 checks, 3 apply modes: SAFE, FORCE, BOOTSTRAP) - [Documentation](modules/firewall/README.md)
 - **`network`**: Network exposure checks (listening ports, IPv6 configuration) - [Documentation](modules/network/README.md)
 - **`services`**: Service detection and logging (Docker, auditd, journald) - [Documentation](modules/services/README.md)
