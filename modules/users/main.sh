@@ -86,7 +86,7 @@ module_scan() {
                 "" \
                 ""
         else
-             add_finding "USR-004" "$SEV_MEDIUM" "$STATUS_INFO" "Root Account Locked" \
+             add_finding "USR-004" "$SEV_MEDIUM" "$STATUS_WARN" "Root Account Locked" \
                 "Root account has a valid password hash or is not strictly locked." \
                 "" \
                 "Ensure this is intentional."

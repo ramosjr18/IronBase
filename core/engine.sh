@@ -8,7 +8,8 @@ source "$(dirname "$0")/../core/utils.sh"
 source "$(dirname "$0")/../core/findings.sh"
 source "$(dirname "$0")/../core/reporting.sh"
 
-IRONBASE_ROOT="$(dirname "$0")/.."
+# Use absolute path for IRONBASE_ROOT to ensure consistent path resolution
+IRONBASE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODULES_DIR="$IRONBASE_ROOT/modules"
 DEFAULT_PROFILE="$IRONBASE_ROOT/profiles/ubuntu-baseline.yaml"
 
@@ -111,7 +112,7 @@ engine_main() {
     log_info "Profile: $profile_path"
     
     # Initialize reporting system
-    # Export IRONBASE_ROOT so init_reporting can use it
+    # Export IRONBASE_ROOT so init_reporting can use it (absolute path)
     export IRONBASE_ROOT
     
     local flags_str=""
@@ -122,10 +123,20 @@ engine_main() {
     local run_dir=$(init_reporting "$action" "$profile_path" "$flags_str")
     log_info "Output directory: $run_dir"
     
-    # Verify initialization succeeded
+    # Verify initialization succeeded and ensure IRONBASE_RUN_DIR is properly exported
     if [[ -z "$run_dir" ]] || [[ ! -d "$run_dir" ]]; then
         log_error "Failed to initialize reporting system. Run directory: $run_dir"
         return 1
+    fi
+    
+    # Ensure IRONBASE_RUN_DIR is set correctly (defensive check)
+    if [[ -z "$IRONBASE_RUN_DIR" ]] || [[ ! -d "$IRONBASE_RUN_DIR" ]]; then
+        log_warn "IRONBASE_RUN_DIR not set correctly. Attempting to set from run_dir..."
+        export IRONBASE_RUN_DIR="$run_dir"
+        if [[ ! -d "$IRONBASE_RUN_DIR" ]]; then
+            log_error "Failed to set IRONBASE_RUN_DIR. Reporting may not work correctly."
+            return 1
+        fi
     fi
 
     # Discover modules

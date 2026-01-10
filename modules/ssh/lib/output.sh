@@ -155,7 +155,13 @@ print_summary() {
         echo "   ./cmd/ironbase apply --module ssh"
         echo -e "   ${C_YELLOW}WARNING: Review configuration before applying fixes.${C_RESET}"
         echo ""
-        echo "Report saved: $(pwd)/$LOG_FILE"
+        # LOG_FILE is already set correctly based on IRONBASE_RUN_DIR (see lines 9-15)
+        # If IRONBASE_RUN_DIR is not set, LOG_FILE will be relative, so use pwd
+        if [[ "$LOG_FILE" = /* ]]; then
+            echo "Report saved: $LOG_FILE"
+        else
+            echo "Report saved: $(pwd)/$LOG_FILE"
+        fi
     fi
     
     # Add Next Steps to Log

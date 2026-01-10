@@ -21,7 +21,7 @@ module_scan() {
         if [[ -S /var/run/docker.sock ]]; then
             local perms
             perms=$(ls -l /var/run/docker.sock)
-            add_finding "SVC-002" "$SEV_LOW" "$STATUS_INFO" "Docker Socket" \
+            add_finding "SVC-002" "$SEV_LOW" "$STATUS_WARN" "Docker Socket" \
                 "Docker socket available." \
                 "$perms" \
                 "Ensure only trusted users are in docker group."
@@ -61,7 +61,7 @@ module_scan() {
             "" \
             ""
     else
-         add_finding "SVC-004" "$SEV_LOW" "$STATUS_INFO" "Journald Persistence" \
+         add_finding "SVC-004" "$SEV_LOW" "$STATUS_WARN" "Journald Persistence" \
             "Journald persistence might not be enabled (memory only?)." \
             "Check /etc/systemd/journald.conf" \
             ""

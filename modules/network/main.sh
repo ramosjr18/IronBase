@@ -35,7 +35,7 @@ module_scan() {
         local ipv6_global_listeners
         ipv6_global_listeners=$(echo "$listening" | grep "\[::\]")
         if [[ -n "$ipv6_global_listeners" ]]; then
-             add_finding "NET-002" "$SEV_MEDIUM" "$STATUS_INFO" "Global Listeners (IPv6)" \
+             add_finding "NET-002" "$SEV_MEDIUM" "$STATUS_WARN" "Global Listeners (IPv6)" \
                 "Services are listening on [::] (all IPv6 interfaces)." \
                 "$(echo "$ipv6_global_listeners" | head -n 3)..." \
                 "Review IPv6 exposure."
@@ -57,7 +57,7 @@ module_scan() {
                 "" \
                 ""
         else
-            add_finding "NET-003" "$SEV_LOW" "$STATUS_INFO" "IPv6 Status" \
+            add_finding "NET-003" "$SEV_LOW" "$STATUS_WARN" "IPv6 Status" \
                 "IPv6 is enabled." \
                 "" \
                 "Disable via sysctl if not needed."

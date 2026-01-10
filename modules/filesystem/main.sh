@@ -167,8 +167,10 @@ module_scan() {
         local perm_octal="${current_perm: -3}"
         
         # Check if world (other) has write permission
+        # Permission digits: 2=write, 3=write+execute, 6=read+write, 7=all (all have write)
+        # 4=read, 5=read+execute (no write)
         local other_perm="${perm_octal: -1}"
-        if [[ "$other_perm" =~ [2-7] ]]; then  # 2=write, 3=write+execute, 4=read, 5=read+execute, 6=read+write, 7=all
+        if [[ "$other_perm" =~ ^[2367]$ ]]; then
             add_finding "$finding_id" "$SEV_HIGH" "$STATUS_FAIL" "$dir_name Permissions" \
                 "$dir_path has permissive permissions ($perm_octal). World/other has write access (permission digit: $other_perm)." \
                 "Current permissions: $perm_octal (stat -c '%a' $dir_path)" \
@@ -268,7 +270,7 @@ module_scan() {
         
         if [[ "$sgid_count" -gt 0 ]]; then
             local sample_sgid=$(echo "$sgid_binaries" | head -n 10)
-            add_finding "FS-015" "$SEV_MEDIUM" "$STATUS_INFO" "SGID Binaries" \
+            add_finding "FS-015" "$SEV_MEDIUM" "$STATUS_WARN" "SGID Binaries" \
                 "Found $sgid_count SGID binary(ies). SGID binaries run with group privileges." \
                 "$(echo "$sample_sgid" | head -n 10)" \
                 "Review SGID binaries: ls -l <file> | grep '^-....s'. Remove SGID bit if not needed: chmod g-s <file>"
