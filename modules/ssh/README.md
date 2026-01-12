@@ -231,6 +231,85 @@ Restart SSH service? [y/N]: y
 SSH hardening complete.
 ```
 
+## Special Considerations: Coolify with Root Hardening
+
+### Problem Context
+
+When blocking root access via SSH hardening, Coolify (a self-hosted PaaS) has certain limitations because it's designed for quick configuration with root access. After hardening and blocking root, Coolify may encounter permission issues, particularly with SSH key storage.
+
+### Solution: Permissions and Ownership Configuration
+
+If you encounter the error **"SSH keys storage directory is not writable"** after hardening SSH and blocking root, apply the following permissions and ownership configuration:
+
+#### 1. Base Data Directory
+```bash
+sudo chmod 755 /data
+```
+**Motivo**: Permitir traversal (ejecución) desde contenedores sin exponer escritura global.
+
+#### 2. Coolify Root Directory
+```bash
+sudo chown -R 9999:9999 /data/coolify
+sudo chmod 755 /data/coolify
+```
+**Motivo**: 
+- UID 9999 = www-data dentro del contenedor Coolify
+- Permite lectura y escritura controlada por Coolify
+
+#### 3. General Internal Permissions
+```bash
+sudo chmod -R 775 /data/coolify
+```
+**Motivo**: Permitir escritura a Coolify y a procesos internos (apps, db, builds).
+
+#### 4. Critical SSH Directories (Main Fix)
+```bash
+sudo mkdir -p /data/coolify/ssh/keys
+sudo mkdir -p /data/coolify/ssh/tmp
+
+sudo chown -R 9999:9999 /data/coolify/ssh
+sudo chmod -R 700 /data/coolify/ssh
+```
+**Motivo**:
+- Coolify guarda keys privadas SSH aquí
+- Requiere permiso estricto (700) por seguridad
+- **Error "SSH keys storage directory is not writable" resuelto aquí**
+
+#### 5. Verification Inside Container
+```bash
+sudo docker exec -it coolify sh -c '
+id &&
+touch /var/www/html/storage/app/ssh/keys/test &&
+rm /var/www/html/storage/app/ssh/keys/test
+'
+```
+
+**Expected Result**:
+```
+uid=9999(www-data) gid=9999(www-data)
+OK
+```
+✔ Confirmado: Coolify sí puede escribir en su storage interno
+
+### Final State Summary
+
+| Ruta | Owner | Permisos |
+|:-----|:------|:---------|
+| `/data` | root | 755 |
+| `/data/coolify` | 9999:9999 | 755 |
+| `/data/coolify/**` | 9999:9999 | 775 |
+| `/data/coolify/ssh/**` | 9999:9999 | 700 |
+
+### Technical Conclusion
+
+❌ El error NO era la app  
+❌ NO era la base de datos  
+❌ NO era Docker  
+✅ Era ownership + permisos incorrectos tras reinstalar / borrar volúmenes  
+✅ Coolify no puede operar sin escritura en `/storage/app/ssh`
+
+**Note**: This configuration is required after reinstalling Coolify or deleting volumes when root SSH access has been blocked. The issue occurs because Coolify expects root-level permissions but operates with UID 9999 (www-data) inside containers.
+
 ## Status
 
 **State**: Stable (Scan Complete, Apply Fully Functional)
